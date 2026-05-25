@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Fix XAUUSD ProTrader EA signal generation and filtering issues preventing trades from being taken. Lower thresholds, fix RSI scoring to be trend-following, reduce news/session filter aggressiveness, add data readiness checks, and adjust risk/cooldown defaults.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Lower signal threshold from 30 to 20 and add EMA fast-path",
     "Rewrite GetRSIScore to be trend-following",
@@ -28,5 +28,5 @@
     "EMA pullback scoring gives +30 for price between fast and slow in a trend"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 8 signal/filter issues fixed. Braces balanced (431/431). GetRSIScore calls GetEMAScore internally for trend context but no recursion risk since GetEMAScore only reads indicator buffers. Session filter default changed from false to true for off-hours. News filter now only blocks impact >= 3 events (NFP, FOMC, CPI, GDP, Fed Speech, Core PCE). File grew from 4002 to 4094 lines."
 }
