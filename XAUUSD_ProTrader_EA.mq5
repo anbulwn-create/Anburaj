@@ -1100,24 +1100,35 @@ int CSignalEngine::GetEMAScore()
    double price = iClose(m_symbol, m_lowerTF, 0);
    int score = 0;
 
+   //--- Higher timeframe scoring with pullback detection
    if(emaFastH[0] > emaSlowH[0] && price > emaFastH[0])
       score += 40;
+   else if(emaFastH[0] > emaSlowH[0] && price > emaSlowH[0])
+      score += 30;   // Pullback in uptrend: price between slow and fast EMA
    else if(emaFastH[0] > emaSlowH[0])
       score += 20;
    else if(emaFastH[0] < emaSlowH[0] && price < emaFastH[0])
       score -= 40;
+   else if(emaFastH[0] < emaSlowH[0] && price < emaSlowH[0])
+      score -= 30;   // Pullback in downtrend: price between slow and fast EMA
    else if(emaFastH[0] < emaSlowH[0])
       score -= 20;
 
+   //--- Lower timeframe scoring with pullback detection
    if(emaFastL[0] > emaSlowL[0] && price > emaFastL[0])
       score += 40;
+   else if(emaFastL[0] > emaSlowL[0] && price > emaSlowL[0])
+      score += 30;   // Pullback in uptrend on lower TF
    else if(emaFastL[0] > emaSlowL[0])
       score += 20;
    else if(emaFastL[0] < emaSlowL[0] && price < emaFastL[0])
       score -= 40;
+   else if(emaFastL[0] < emaSlowL[0] && price < emaSlowL[0])
+      score -= 30;   // Pullback in downtrend on lower TF
    else if(emaFastL[0] < emaSlowL[0])
       score -= 20;
 
+   //--- Crossover bonus
    if(emaFastL[1] <= emaSlowL[1] && emaFastL[0] > emaSlowL[0])
       score += 20;
    else if(emaFastL[1] >= emaSlowL[1] && emaFastL[0] < emaSlowL[0])
@@ -1133,27 +1144,62 @@ int CSignalEngine::GetRSIScore()
    double rsi[3];
    if(CopyBuffer(m_hRsi, 0, 0, 3, rsi) < 3) return 0;
 
+   //--- Determine EMA trend direction first for trend-following RSI logic
+   int emaTrend = GetEMAScore();
    int score = 0;
 
-   if(rsi[0] < m_rsiOversold)
-      score += 60;
-   else if(rsi[0] < 40)
-      score += 30;
+   if(emaTrend > 20)
+   {
+      //--- Bullish EMA trend: RSI above 50 confirms, momentum rising helps
+      if(rsi[0] > 50)
+         score += 40;   // RSI confirms bullish trend
+      else if(rsi[0] > 40)
+         score += 10;   // Neutral zone, slight bullish lean
 
-   if(rsi[0] > m_rsiOverbought)
-      score -= 60;
-   else if(rsi[0] > 60)
-      score -= 30;
+      //--- Rising momentum in uptrend
+      if(rsi[0] > rsi[1] && rsi[1] > rsi[2])
+         score += 20;
 
-   if(rsi[0] > rsi[1] && rsi[1] > rsi[2])
-      score += 20;
-   else if(rsi[0] < rsi[1] && rsi[1] < rsi[2])
-      score -= 20;
+      //--- Overbought warning (reduce confidence but don't negate)
+      if(rsi[0] > m_rsiOverbought)
+         score -= 15;
+   }
+   else if(emaTrend < -20)
+   {
+      //--- Bearish EMA trend: RSI below 50 confirms, momentum falling helps
+      if(rsi[0] < 50)
+         score -= 40;   // RSI confirms bearish trend
+      else if(rsi[0] < 60)
+         score -= 10;   // Neutral zone, slight bearish lean
 
+      //--- Falling momentum in downtrend
+      if(rsi[0] < rsi[1] && rsi[1] < rsi[2])
+         score -= 20;
+
+      //--- Oversold warning (reduce confidence but don't negate)
+      if(rsi[0] < m_rsiOversold)
+         score += 15;
+   }
+   else
+   {
+      //--- No clear EMA trend: use RSI for range/reversal signals
+      if(rsi[0] < m_rsiOversold)
+         score += 40;
+      else if(rsi[0] > m_rsiOverbought)
+         score -= 40;
+
+      //--- Momentum
+      if(rsi[0] > rsi[1] && rsi[1] > rsi[2])
+         score += 15;
+      else if(rsi[0] < rsi[1] && rsi[1] < rsi[2])
+         score -= 15;
+   }
+
+   //--- Divergence detection (keep as additional signal)
    if(DetectRSIDivergence(true))
-      score += 20;
+      score += 15;
    if(DetectRSIDivergence(false))
-      score -= 20;
+      score -= 15;
 
    return MathMax(-100, MathMin(100, score));
 }
@@ -1315,27 +1361,44 @@ SignalResult CSignalEngine::GenerateSignal()
    }
    double compositeScore = (emaScore * m_weightEMA + rsiScore * m_weightRSI + smcScore * m_weightSMC) / totalWeight;
 
-   result.strength = (int)MathAbs(compositeScore);
    result.emaConfirmed = (MathAbs(emaScore) > 40);
    result.rsiConfirmed = (MathAbs(rsiScore) > 30);
    result.smcConfirmed = (MathAbs(smcScore) > 30);
 
-   int minStrength = 30;
+   int minStrength = 20;
 
-   if(compositeScore >= minStrength)
+   //--- EMA fast-path: strong dual-timeframe trend can trigger signal alone
+   if(emaScore >= 60)
    {
       result.signal = SIGNAL_BUY;
+      result.strength = emaScore;
+      result.reason = StringFormat("BUY (EMA fast-path): EMA=%d RSI=%d SMC=%d",
+                                    emaScore, rsiScore, smcScore);
+   }
+   else if(emaScore <= -60)
+   {
+      result.signal = SIGNAL_SELL;
+      result.strength = MathAbs(emaScore);
+      result.reason = StringFormat("SELL (EMA fast-path): EMA=%d RSI=%d SMC=%d",
+                                    emaScore, rsiScore, smcScore);
+   }
+   else if(compositeScore >= minStrength)
+   {
+      result.signal = SIGNAL_BUY;
+      result.strength = (int)MathAbs(compositeScore);
       result.reason = StringFormat("BUY: EMA=%d RSI=%d SMC=%d Composite=%.0f",
                                     emaScore, rsiScore, smcScore, compositeScore);
    }
    else if(compositeScore <= -minStrength)
    {
       result.signal = SIGNAL_SELL;
+      result.strength = (int)MathAbs(compositeScore);
       result.reason = StringFormat("SELL: EMA=%d RSI=%d SMC=%d Composite=%.0f",
                                     emaScore, rsiScore, smcScore, compositeScore);
    }
    else
    {
+      result.strength = (int)MathAbs(compositeScore);
       result.reason = StringFormat("NO SIGNAL: EMA=%d RSI=%d SMC=%d Composite=%.0f (threshold=%d)",
                                     emaScore, rsiScore, smcScore, compositeScore, minStrength);
    }
@@ -1806,6 +1869,7 @@ private:
    bool              m_tradeNewYork;
    bool              m_tradeAsian;
    bool              m_tradeOverlap;
+   bool              m_tradeAllSessions;
    int               m_customStartHour;
    int               m_customEndHour;
    bool              m_useCustomHours;
@@ -1829,7 +1893,7 @@ public:
    void              SetBreakEven(double triggerPips, double offsetPips);
    void              SetPartialClose(double percent, double triggerPips);
    void              SetCooldown(int seconds) { m_cooldownSeconds = seconds; }
-   void              SetSessionFilter(bool london, bool ny, bool asian, bool overlap);
+   void              SetSessionFilter(bool allSessions, bool london, bool ny, bool asian, bool overlap);
    void              SetCustomHours(int startHour, int endHour);
 
    bool              IsSpreadOK();
@@ -1873,6 +1937,7 @@ CTradeManager::CTradeManager()
    m_tradeNewYork = true;
    m_tradeAsian = false;
    m_tradeOverlap = true;
+   m_tradeAllSessions = true;
    m_customStartHour = 0;
    m_customEndHour = 24;
    m_useCustomHours = false;
@@ -1944,8 +2009,9 @@ void CTradeManager::SetPartialClose(double percent, double triggerPips)
    m_partialClosePips = triggerPips;
 }
 
-void CTradeManager::SetSessionFilter(bool london, bool ny, bool asian, bool overlap)
+void CTradeManager::SetSessionFilter(bool allSessions, bool london, bool ny, bool asian, bool overlap)
 {
+   m_tradeAllSessions = allSessions;
    m_tradeLondon = london;
    m_tradeNewYork = ny;
    m_tradeAsian = asian;
@@ -1983,6 +2049,9 @@ bool CTradeManager::IsCooldownExpired()
 
 bool CTradeManager::IsSessionAllowed()
 {
+   if(m_tradeAllSessions)
+      return true;
+
    if(m_useCustomHours)
       return IsWithinHours(m_customStartHour, m_customEndHour);
 
@@ -1993,7 +2062,7 @@ bool CTradeManager::IsSessionAllowed()
       case SESSION_NEWYORK:  return m_tradeNewYork;
       case SESSION_ASIAN:    return m_tradeAsian;
       case SESSION_OVERLAP:  return m_tradeOverlap;
-      default:               return false;
+      default:               return true;
    }
 }
 
@@ -3191,7 +3260,7 @@ void CNewsFilter::BuildNewsSchedule()
    events[count].weekOfMonth = 0;
    events[count].hour = 15;
    events[count].minute = 30;
-   events[count].impact = 2;
+   events[count].impact = 1;
    count++;
 
    ArrayResize(events, count + 1);
@@ -3263,6 +3332,9 @@ bool CNewsFilter::IsNearScheduledNews()
 
    for(int i = 0; i < m_newsCount; i++)
    {
+      //--- Only block for high-impact events (impact >= 3)
+      if(m_newsSchedule[i].impact < 3) continue;
+
       if(m_newsSchedule[i].dayOfWeek != dt.day_of_week) continue;
       if(m_newsSchedule[i].weekOfMonth != 0 && m_newsSchedule[i].weekOfMonth != currentWeek)
          continue;
@@ -3390,7 +3462,7 @@ input double   InpDailyLossLimit  = 3.0;         // Daily Loss Limit (%)
 input double   InpMinBalance      = 80.0;        // Minimum Balance to Trade ($)
 input int      InpMaxConsecLoss   = 3;           // Max Consecutive Losses Before Reduction
 input double   InpLotReduction    = 0.5;         // Lot Reduction Factor After Losses
-input double   InpMinRiskReward   = 1.5;         // Minimum Risk:Reward Ratio
+input double   InpMinRiskReward   = 1.0;         // Minimum Risk:Reward Ratio
 input bool     InpUseKelly        = false;       // Use Kelly Criterion Lot Sizing
 input bool     InpUseEquityCurve  = false;       // Use Equity Curve Filter
 input double   InpDefaultSLPips   = 50.0;        // Default Stop Loss (pips)
@@ -3403,7 +3475,7 @@ input group "=== Trade Management ==="
 input double   InpMaxSpread       = 50.0;        // Max Spread Allowed (pips)
 input int      InpMaxSlippage     = 30;          // Max Slippage (points)
 input int      InpMaxPositions    = 3;           // Max Open Positions
-input int      InpCooldownSec     = 300;         // Cooldown Between Trades (seconds)
+input int      InpCooldownSec     = 60;          // Cooldown Between Trades (seconds)
 input double   InpBreakEvenPips   = 30.0;        // Break-Even Trigger (pips profit)
 input double   InpBreakEvenOffset = 2.0;         // Break-Even Offset (pips above entry)
 input double   InpPartialPercent  = 50.0;        // Partial Close (% of position)
@@ -3427,8 +3499,8 @@ input double   InpATRMultiplier   = 2.0;         // ATR Multiplier (for ATR mode
 //+------------------------------------------------------------------+
 input group "=== News Filter ==="
 input bool     InpNewsFilter      = true;        // Enable News Filter
-input int      InpNewsBefore      = 30;          // Minutes Before News to Pause
-input int      InpNewsAfter       = 15;          // Minutes After News to Resume
+input int      InpNewsBefore      = 15;          // Minutes Before News to Pause
+input int      InpNewsAfter       = 10;          // Minutes After News to Resume
 input bool     InpFilterFriday    = true;        // Avoid Trading Friday Evening
 input int      InpFridayEndHour   = 20;          // Friday Stop Hour
 input bool     InpFilterMonday    = true;        // Avoid Monday Early Hours
@@ -3438,6 +3510,7 @@ input int      InpMondayStartHour = 3;           // Monday Start Hour
 //| Input Parameters - Session Filter                                 |
 //+------------------------------------------------------------------+
 input group "=== Session Filter ==="
+input bool     InpTradeAllSessions = true;       // Trade All Sessions (bypass session filter)
 input bool     InpTradeLondon     = true;        // Trade During London Session
 input bool     InpTradeNewYork    = true;        // Trade During New York Session
 input bool     InpTradeAsian      = false;       // Trade During Asian Session
@@ -3501,6 +3574,25 @@ int OnInit()
       g_signalEngine.SetSMCAnalysis(&g_smcAnalysis);
    g_signalEngine.SetWeights(InpSignalWeightEMA, InpSignalWeightRSI, InpSignalWeightSMC);
 
+   //--- Check data readiness (bars available for EMA 200 calculation)
+   int barsLower = Bars(_Symbol, InpLowerTF);
+   int barsHigher = Bars(_Symbol, InpHigherTF);
+   int minBarsRequired = InpEMASlowPeriod + 50;  // EMA slow period + buffer
+
+   if(barsLower < minBarsRequired)
+      XAU_LogWarning(StringFormat("Low bar count on %s: %d bars available, %d recommended. Indicators may not be ready.",
+                     EnumToString(InpLowerTF), barsLower, minBarsRequired));
+   else
+      XAU_LogInfo(StringFormat("Data ready on %s: %d bars available (need %d)",
+                     EnumToString(InpLowerTF), barsLower, minBarsRequired));
+
+   if(barsHigher < minBarsRequired)
+      XAU_LogWarning(StringFormat("Low bar count on %s: %d bars available, %d recommended. Indicators may not be ready.",
+                     EnumToString(InpHigherTF), barsHigher, minBarsRequired));
+   else
+      XAU_LogInfo(StringFormat("Data ready on %s: %d bars available (need %d)",
+                     EnumToString(InpHigherTF), barsHigher, minBarsRequired));
+
    //--- Initialize Risk Manager
    if(!g_riskManager.Init(InpRiskPercent, InpMaxDrawdown, InpDailyLossLimit,
                            InpMinBalance, InpMaxConsecLoss, InpLotReduction))
@@ -3522,7 +3614,7 @@ int OnInit()
    g_tradeManager.SetBreakEven(InpBreakEvenPips, InpBreakEvenOffset);
    g_tradeManager.SetPartialClose(InpPartialPercent, InpPartialTrigger);
    g_tradeManager.SetCooldown(InpCooldownSec);
-   g_tradeManager.SetSessionFilter(InpTradeLondon, InpTradeNewYork, InpTradeAsian, InpTradeOverlap);
+   g_tradeManager.SetSessionFilter(InpTradeAllSessions, InpTradeLondon, InpTradeNewYork, InpTradeAsian, InpTradeOverlap);
    if(InpUseCustomHours)
       g_tradeManager.SetCustomHours(InpCustomStartHour, InpCustomEndHour);
 
@@ -3657,7 +3749,7 @@ void OnTick()
    g_lastSignalStrength = signal.strength;
 
    //--- Step 11: Execute trade if signal is valid
-   if(signal.signal != SIGNAL_NONE && signal.strength >= 30)
+   if(signal.signal != SIGNAL_NONE && signal.strength >= 20)
    {
       ExecuteTrade(signal);
    }
