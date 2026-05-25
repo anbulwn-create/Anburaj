@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix XAUUSD ProTrader EA signal generation and filtering issues preventing trades from being taken. Lower thresholds, fix RSI scoring to be trend-following, reduce news/session filter aggressiveness, add data readiness checks, and adjust risk/cooldown defaults.",
+  "status": "in_progress",
+  "steps": [
+    "Lower signal threshold from 30 to 20 and add EMA fast-path",
+    "Rewrite GetRSIScore to be trend-following",
+    "Add InpTradeAllSessions input and bypass session filter when true",
+    "Change news filter defaults and add impact threshold",
+    "Lower InpMinRiskReward from 1.5 to 1.0",
+    "Lower InpCooldownSec from 300 to 60",
+    "Add bars readiness check in OnInit",
+    "Add intermediate pullback scoring in GetEMAScore"
+  ],
+  "acceptance_criteria": [
+    "Signal threshold lowered to 20 in GenerateSignal and OnTick",
+    "EMA fast-path: if emaScore >= 60, signal generated regardless of composite",
+    "RSI scoring is trend-following based on EMA direction",
+    "InpTradeAllSessions input added defaulting to true",
+    "IsSessionAllowed returns true when InpTradeAllSessions is true",
+    "News filter only blocks events with impact >= 3",
+    "Jobless Claims impact changed to 1",
+    "InpNewsBefore changed to 15, InpNewsAfter changed to 10",
+    "InpMinRiskReward changed to 1.0",
+    "InpCooldownSec changed to 60",
+    "Bars readiness check in OnInit with log messages",
+    "EMA pullback scoring gives +30 for price between fast and slow in a trend"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}
