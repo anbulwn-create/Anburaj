@@ -1,14 +1,14 @@
 {
   "task_id": "task-xauusd-ea-bot",
-  "task_description": "Create a professional-grade MetaTrader 5 Expert Advisor for XAUUSD trading with modular architecture. Features: EMA multi-timeframe trend following, RSI confirmation, Smart Money Concepts (order blocks, FVG, liquidity), hidden lock-in profit, trailing stops, jump stop loss, news filter, automatic lot sizing, spread/slippage protection, risk management, and money management. Designed for M5/H1 timeframe with minimum $100 deposit.",
+  "task_description": "Rewrite XAUUSD ProTrader EA to be simple, effective, and actually take trades. EMA 21/50 trend following with RSI confirmation. Under 500 lines, zero includes, raw OrderSend.",
   "status": "completed",
-  "feature_order": ["FEAT-001"],
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
   "blocked_reason": null,
   "verification": {
     "build": "skipped",
     "tests": "skipped",
     "test_quality": "skipped",
     "docker_build": "skipped",
-    "summary": "MQL5 code cannot be compiled or tested in this sandbox (INTEGRATIONS_ONLY). All 9 files verified structurally (5,040 lines total). All 10 review issues addressed in fix commit. Code passes structural inspection for correctness, proper include structure, header guards, event handlers, input parameter groups, standard library usage, and cross-module consistency."
+    "summary": "MQL5 code cannot be compiled in sandbox (INTEGRATIONS_ONLY). Structural verification: 484 lines, braces balanced (31/31), zero #include statements, all required functions present (OnInit, OnDeinit, OnTick, GetSignal, CalculateLotSize, OpenBuy, OpenSell, SendTradeRequest, ManageTrailing, ModifyPosition, CountPositions, IsSessionAllowed)."
   }
 }
