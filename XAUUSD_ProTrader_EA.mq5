@@ -12,11 +12,8 @@
 #property description "Designed for M5 chart with H1 trend confirmation."
 
 //+------------------------------------------------------------------+
-//| Standard Library Includes (MT5 built-in)                          |
+//| No Standard Library Includes - Uses raw MQL5 functions only       |
 //+------------------------------------------------------------------+
-#include <Trade/Trade.mqh>
-#include <Trade/PositionInfo.mqh>
-#include <Trade/SymbolInfo.mqh>
 
 //+------------------------------------------------------------------+
 //| Constants                                                         |
@@ -1793,10 +1790,6 @@ void CRiskManager::Update()
 class CTradeManager
 {
 private:
-   CTrade            m_trade;
-   CPositionInfo     m_position;
-   CSymbolInfo       m_symbolInfo;
-
    string            m_symbol;
    long              m_magicNumber;
    string            m_comment;
@@ -1820,6 +1813,12 @@ private:
    datetime          m_lastTradeTime;
    ulong             m_partialClosedTickets[];
    int               m_partialClosedCount;
+
+   ENUM_ORDER_TYPE_FILLING m_fillingType;
+   ulong             m_lastOrderTicket;
+
+   ENUM_ORDER_TYPE_FILLING DetectFillingMode();
+   bool              SendOrder(MqlTradeRequest &request, MqlTradeResult &result);
 
 public:
                      CTradeManager();
@@ -1879,6 +1878,8 @@ CTradeManager::CTradeManager()
    m_useCustomHours = false;
    m_lastTradeTime = 0;
    m_partialClosedCount = 0;
+   m_fillingType = ORDER_FILLING_FOK;
+   m_lastOrderTicket = 0;
 }
 
 CTradeManager::~CTradeManager()
@@ -1896,26 +1897,38 @@ bool CTradeManager::Init(string symbol, long magic, string comment,
    m_maxSlippage = maxSlip;
    m_maxPositions = maxPos;
 
-   m_trade.SetExpertMagicNumber(magic);
-   m_trade.SetDeviationInPoints(maxSlip);
-   m_trade.SetMarginMode();
-
-   long fillingMode = SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
-   if((fillingMode & SYMBOL_FILLING_FOK) != 0)
-      m_trade.SetTypeFilling(ORDER_FILLING_FOK);
-   else if((fillingMode & SYMBOL_FILLING_IOC) != 0)
-      m_trade.SetTypeFilling(ORDER_FILLING_IOC);
-   else
-      m_trade.SetTypeFilling(ORDER_FILLING_RETURN);
-
-   if(!m_symbolInfo.Name(symbol))
-   {
-      XAU_LogError("TradeManager: Failed to set symbol info for " + symbol);
-      return false;
-   }
+   m_fillingType = DetectFillingMode();
 
    XAU_LogInfo(StringFormat("TradeManager initialized: %s Magic=%d MaxSpread=%.1f MaxSlip=%d MaxPos=%d",
            symbol, magic, maxSpread, maxSlip, maxPos));
+   return true;
+}
+
+ENUM_ORDER_TYPE_FILLING CTradeManager::DetectFillingMode()
+{
+   long fillingMode = SymbolInfoInteger(m_symbol, SYMBOL_FILLING_MODE);
+   if((fillingMode & SYMBOL_FILLING_FOK) != 0)
+      return ORDER_FILLING_FOK;
+   else if((fillingMode & SYMBOL_FILLING_IOC) != 0)
+      return ORDER_FILLING_IOC;
+   return ORDER_FILLING_RETURN;
+}
+
+bool CTradeManager::SendOrder(MqlTradeRequest &request, MqlTradeResult &result)
+{
+   ZeroMemory(result);
+   if(!OrderSend(request, result))
+   {
+      XAU_LogWarning(StringFormat("OrderSend failed: retcode=%d desc=%s",
+                 result.retcode, result.comment));
+      return false;
+   }
+   if(result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_PLACED)
+   {
+      XAU_LogWarning(StringFormat("OrderSend retcode: %d desc=%s",
+                 result.retcode, result.comment));
+      return false;
+   }
    return true;
 }
 
@@ -1988,29 +2001,45 @@ bool CTradeManager::OpenBuy(double lots, double sl, double tp, string tradeComme
 {
    if(tradeComment == "") tradeComment = m_comment;
 
-   m_symbolInfo.RefreshRates();
-   double ask = m_symbolInfo.Ask();
+   double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
 
    for(int attempt = 0; attempt < MAX_RETRIES; attempt++)
    {
-      if(m_trade.Buy(lots, m_symbol, ask, sl, tp, tradeComment))
+      MqlTradeRequest request;
+      MqlTradeResult  result;
+      ZeroMemory(request);
+      ZeroMemory(result);
+
+      request.action       = TRADE_ACTION_DEAL;
+      request.symbol       = m_symbol;
+      request.volume       = lots;
+      request.type         = ORDER_TYPE_BUY;
+      request.price        = ask;
+      request.sl           = sl;
+      request.tp           = tp;
+      request.deviation    = (ulong)m_maxSlippage;
+      request.magic        = m_magicNumber;
+      request.comment      = tradeComment;
+      request.type_filling = m_fillingType;
+
+      if(SendOrder(request, result))
       {
          m_lastTradeTime = TimeCurrent();
+         m_lastOrderTicket = result.order;
          XAU_LogInfo(StringFormat("BUY opened: %.2f lots @ %.2f SL=%.2f TP=%.2f",
                  lots, ask, sl, tp));
          return true;
       }
 
-      int error = (int)m_trade.ResultRetcode();
+      uint retcode = result.retcode;
       XAU_LogWarning(StringFormat("BUY attempt %d failed: %d - %s",
-                 attempt + 1, error, m_trade.ResultRetcodeDescription()));
+                 attempt + 1, retcode, result.comment));
 
-      if(error == TRADE_RETCODE_NO_MONEY || error == TRADE_RETCODE_MARKET_CLOSED)
+      if(retcode == TRADE_RETCODE_NO_MONEY || retcode == TRADE_RETCODE_MARKET_CLOSED)
          break;
 
       Sleep(RETRY_DELAY_MS);
-      m_symbolInfo.RefreshRates();
-      ask = m_symbolInfo.Ask();
+      ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
    }
 
    XAU_LogError("BUY order failed after all retries");
@@ -2021,29 +2050,45 @@ bool CTradeManager::OpenSell(double lots, double sl, double tp, string tradeComm
 {
    if(tradeComment == "") tradeComment = m_comment;
 
-   m_symbolInfo.RefreshRates();
-   double bid = m_symbolInfo.Bid();
+   double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
 
    for(int attempt = 0; attempt < MAX_RETRIES; attempt++)
    {
-      if(m_trade.Sell(lots, m_symbol, bid, sl, tp, tradeComment))
+      MqlTradeRequest request;
+      MqlTradeResult  result;
+      ZeroMemory(request);
+      ZeroMemory(result);
+
+      request.action       = TRADE_ACTION_DEAL;
+      request.symbol       = m_symbol;
+      request.volume       = lots;
+      request.type         = ORDER_TYPE_SELL;
+      request.price        = bid;
+      request.sl           = sl;
+      request.tp           = tp;
+      request.deviation    = (ulong)m_maxSlippage;
+      request.magic        = m_magicNumber;
+      request.comment      = tradeComment;
+      request.type_filling = m_fillingType;
+
+      if(SendOrder(request, result))
       {
          m_lastTradeTime = TimeCurrent();
+         m_lastOrderTicket = result.order;
          XAU_LogInfo(StringFormat("SELL opened: %.2f lots @ %.2f SL=%.2f TP=%.2f",
                  lots, bid, sl, tp));
          return true;
       }
 
-      int error = (int)m_trade.ResultRetcode();
+      uint retcode = result.retcode;
       XAU_LogWarning(StringFormat("SELL attempt %d failed: %d - %s",
-                 attempt + 1, error, m_trade.ResultRetcodeDescription()));
+                 attempt + 1, retcode, result.comment));
 
-      if(error == TRADE_RETCODE_NO_MONEY || error == TRADE_RETCODE_MARKET_CLOSED)
+      if(retcode == TRADE_RETCODE_NO_MONEY || retcode == TRADE_RETCODE_MARKET_CLOSED)
          break;
 
       Sleep(RETRY_DELAY_MS);
-      m_symbolInfo.RefreshRates();
-      bid = m_symbolInfo.Bid();
+      bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
    }
 
    XAU_LogError("SELL order failed after all retries");
@@ -2052,10 +2097,21 @@ bool CTradeManager::OpenSell(double lots, double sl, double tp, string tradeComm
 
 bool CTradeManager::ModifyPosition(ulong ticket, double sl, double tp)
 {
-   if(!m_trade.PositionModify(ticket, sl, tp))
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action   = TRADE_ACTION_SLTP;
+   request.symbol   = m_symbol;
+   request.position = ticket;
+   request.sl       = sl;
+   request.tp       = tp;
+
+   if(!SendOrder(request, result))
    {
-      XAU_LogWarning(StringFormat("Position modify failed: ticket=%d error=%d",
-                 ticket, m_trade.ResultRetcode()));
+      XAU_LogWarning(StringFormat("Position modify failed: ticket=%d retcode=%d",
+                 ticket, result.retcode));
       return false;
    }
    return true;
@@ -2063,10 +2119,43 @@ bool CTradeManager::ModifyPosition(ulong ticket, double sl, double tp)
 
 bool CTradeManager::ClosePosition(ulong ticket)
 {
-   if(!m_trade.PositionClose(ticket))
+   if(!PositionSelectByTicket(ticket))
    {
-      XAU_LogWarning(StringFormat("Position close failed: ticket=%d error=%d",
-                 ticket, m_trade.ResultRetcode()));
+      XAU_LogWarning(StringFormat("ClosePosition: cannot select ticket=%d", ticket));
+      return false;
+   }
+
+   double volume = PositionGetDouble(POSITION_VOLUME);
+   long   posType = PositionGetInteger(POSITION_TYPE);
+
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action       = TRADE_ACTION_DEAL;
+   request.symbol       = m_symbol;
+   request.volume       = volume;
+   request.position     = ticket;
+   request.deviation    = (ulong)m_maxSlippage;
+   request.magic        = m_magicNumber;
+   request.type_filling = m_fillingType;
+
+   if(posType == POSITION_TYPE_BUY)
+   {
+      request.type  = ORDER_TYPE_SELL;
+      request.price = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+   }
+   else
+   {
+      request.type  = ORDER_TYPE_BUY;
+      request.price = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+   }
+
+   if(!SendOrder(request, result))
+   {
+      XAU_LogWarning(StringFormat("Position close failed: ticket=%d retcode=%d",
+                 ticket, result.retcode));
       return false;
    }
    XAU_LogInfo(StringFormat("Position closed: ticket=%d", ticket));
@@ -2078,13 +2167,16 @@ bool CTradeManager::CloseAllPositions()
    bool allClosed = true;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(m_position.SelectByIndex(i))
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string sym = PositionGetString(POSITION_SYMBOL);
+
+      if(magic == m_magicNumber && sym == m_symbol)
       {
-         if(m_position.Magic() == m_magicNumber && m_position.Symbol() == m_symbol)
-         {
-            if(!ClosePosition(m_position.Ticket()))
-               allClosed = false;
-         }
+         if(!ClosePosition(ticket))
+            allClosed = false;
       }
    }
    return allClosed;
@@ -2092,23 +2184,49 @@ bool CTradeManager::CloseAllPositions()
 
 bool CTradeManager::PartialClose(ulong ticket, double percent)
 {
-   if(!m_position.SelectByTicket(ticket)) return false;
+   if(!PositionSelectByTicket(ticket)) return false;
 
-   double volume = m_position.Volume();
+   double volume = PositionGetDouble(POSITION_VOLUME);
    double closeVolume = XAU_NormalizeLot(volume * (percent / 100.0));
 
    if(closeVolume < SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN))
       return false;
 
-   if(m_trade.PositionClosePartial(ticket, closeVolume))
+   long posType = PositionGetInteger(POSITION_TYPE);
+
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action       = TRADE_ACTION_DEAL;
+   request.symbol       = m_symbol;
+   request.volume       = closeVolume;
+   request.position     = ticket;
+   request.deviation    = (ulong)m_maxSlippage;
+   request.magic        = m_magicNumber;
+   request.type_filling = m_fillingType;
+
+   if(posType == POSITION_TYPE_BUY)
+   {
+      request.type  = ORDER_TYPE_SELL;
+      request.price = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+   }
+   else
+   {
+      request.type  = ORDER_TYPE_BUY;
+      request.price = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+   }
+
+   if(SendOrder(request, result))
    {
       XAU_LogInfo(StringFormat("Partial close: ticket=%d volume=%.2f (%.0f%%)",
               ticket, closeVolume, percent));
       return true;
    }
 
-   XAU_LogWarning(StringFormat("Partial close failed: ticket=%d error=%d",
-              ticket, m_trade.ResultRetcode()));
+   XAU_LogWarning(StringFormat("Partial close failed: ticket=%d retcode=%d",
+              ticket, result.retcode));
    return false;
 }
 
@@ -2117,34 +2235,40 @@ void CTradeManager::ManageBreakEven()
 {
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(!m_position.SelectByIndex(i)) continue;
-      if(m_position.Magic() != m_magicNumber || m_position.Symbol() != m_symbol) continue;
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
 
-      double openPrice = m_position.PriceOpen();
-      double currentSL = m_position.StopLoss();
-      double currentPrice = m_position.PriceCurrent();
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string sym = PositionGetString(POSITION_SYMBOL);
+      if(magic != m_magicNumber || sym != m_symbol) continue;
+
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+      long   posType = PositionGetInteger(POSITION_TYPE);
       double profitPips = 0;
 
-      if(m_position.PositionType() == POSITION_TYPE_BUY)
+      if(posType == POSITION_TYPE_BUY)
       {
          profitPips = XAU_PriceToPips(currentPrice - openPrice);
          double newSL = openPrice + XAU_PipsToPrice(m_breakEvenOffset);
          if(profitPips >= m_breakEvenPips && currentSL < openPrice)
          {
-            ModifyPosition(m_position.Ticket(), newSL, m_position.TakeProfit());
+            ModifyPosition(ticket, newSL, currentTP);
             XAU_LogDebug(StringFormat("Break-even set for BUY ticket %d at %.2f",
-                     m_position.Ticket(), newSL));
+                     ticket, newSL));
          }
       }
-      else if(m_position.PositionType() == POSITION_TYPE_SELL)
+      else if(posType == POSITION_TYPE_SELL)
       {
          profitPips = XAU_PriceToPips(openPrice - currentPrice);
          double newSL = openPrice - XAU_PipsToPrice(m_breakEvenOffset);
          if(profitPips >= m_breakEvenPips && (currentSL > openPrice || currentSL == 0))
          {
-            ModifyPosition(m_position.Ticket(), newSL, m_position.TakeProfit());
+            ModifyPosition(ticket, newSL, currentTP);
             XAU_LogDebug(StringFormat("Break-even set for SELL ticket %d at %.2f",
-                     m_position.Ticket(), newSL));
+                     ticket, newSL));
          }
       }
    }
@@ -2154,15 +2278,19 @@ void CTradeManager::ManagePartialClose()
 {
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(!m_position.SelectByIndex(i)) continue;
-      if(m_position.Magic() != m_magicNumber || m_position.Symbol() != m_symbol) continue;
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
 
-      double openPrice = m_position.PriceOpen();
-      double currentPrice = m_position.PriceCurrent();
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string sym = PositionGetString(POSITION_SYMBOL);
+      if(magic != m_magicNumber || sym != m_symbol) continue;
+
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+      long   posType = PositionGetInteger(POSITION_TYPE);
       double profitPips = 0;
-      ulong ticket = m_position.Ticket();
 
-      if(m_position.PositionType() == POSITION_TYPE_BUY)
+      if(posType == POSITION_TYPE_BUY)
          profitPips = XAU_PriceToPips(currentPrice - openPrice);
       else
          profitPips = XAU_PriceToPips(openPrice - currentPrice);
@@ -2196,7 +2324,8 @@ void CTradeManager::ManagePartialClose()
       bool found = false;
       for(int j = PositionsTotal() - 1; j >= 0; j--)
       {
-         if(m_position.SelectByIndex(j) && m_position.Ticket() == m_partialClosedTickets[i])
+         ulong t = PositionGetTicket(j);
+         if(t == m_partialClosedTickets[i])
          {
             found = true;
             break;
@@ -2217,11 +2346,13 @@ int CTradeManager::CountOpenPositions()
    int count = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(m_position.SelectByIndex(i))
-      {
-         if(m_position.Magic() == m_magicNumber && m_position.Symbol() == m_symbol)
-            count++;
-      }
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string sym = PositionGetString(POSITION_SYMBOL);
+      if(magic == m_magicNumber && sym == m_symbol)
+         count++;
    }
    return count;
 }
@@ -2231,32 +2362,34 @@ double CTradeManager::GetTotalProfit()
    double total = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(m_position.SelectByIndex(i))
-      {
-         if(m_position.Magic() == m_magicNumber && m_position.Symbol() == m_symbol)
-            total += m_position.Profit() + m_position.Swap() + m_position.Commission();
-      }
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string sym = PositionGetString(POSITION_SYMBOL);
+      if(magic == m_magicNumber && sym == m_symbol)
+         total += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
    }
    return total;
 }
 
 double CTradeManager::GetPositionProfit(ulong ticket)
 {
-   if(m_position.SelectByTicket(ticket))
-      return m_position.Profit() + m_position.Swap() + m_position.Commission();
+   if(PositionSelectByTicket(ticket))
+      return PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
    return 0;
 }
 
 double CTradeManager::GetCurrentSpreadPips()
 {
-   m_symbolInfo.RefreshRates();
-   double spread = m_symbolInfo.Ask() - m_symbolInfo.Bid();
-   return XAU_PriceToPips(spread);
+   double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+   return XAU_PriceToPips(ask - bid);
 }
 
 ulong CTradeManager::GetLastTicket()
 {
-   return m_trade.ResultOrder();
+   return m_lastOrderTicket;
 }
 
 bool CTradeManager::HasOpenPosition()
@@ -2271,14 +2404,16 @@ void CTradeManager::GetOpenTickets(ulong &tickets[], int &count)
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(m_position.SelectByIndex(i))
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string sym = PositionGetString(POSITION_SYMBOL);
+      if(magic == m_magicNumber && sym == m_symbol)
       {
-         if(m_position.Magic() == m_magicNumber && m_position.Symbol() == m_symbol)
-         {
-            ArrayResize(tickets, count + 1);
-            tickets[count] = m_position.Ticket();
-            count++;
-         }
+         ArrayResize(tickets, count + 1);
+         tickets[count] = ticket;
+         count++;
       }
    }
 }
@@ -2310,8 +2445,7 @@ private:
    HiddenStopData    m_hiddenStops[];
    int               m_hiddenStopCount;
 
-   CTrade            m_trade;
-   CPositionInfo     m_position;
+   ENUM_ORDER_TYPE_FILLING m_fillingType;
 
    int               FindHiddenStop(ulong ticket);
    void              AddHiddenStop(ulong ticket);
@@ -2320,6 +2454,8 @@ private:
    double            GetSwingLow(int bars);
    double            GetSwingHigh(int bars);
    double            CalculateProgressiveDistance(double profitPips);
+
+   bool              ModifyPositionSLTP(ulong ticket, double sl, double tp);
 
    void              TrailStandard(ulong ticket);
    void              TrailHiddenLockIn(ulong ticket);
@@ -2364,6 +2500,7 @@ CTrailingStop::CTrailingStop()
    m_progressiveMin = 10.0;
    m_progressiveRate = 0.5;
    m_hiddenStopCount = 0;
+   m_fillingType = ORDER_FILLING_FOK;
 }
 
 CTrailingStop::~CTrailingStop()
@@ -2379,7 +2516,15 @@ bool CTrailingStop::Init(string symbol, long magic, ENUM_TRAILING_MODE mode,
    m_mode = mode;
    m_timeframe = tf;
 
-   m_trade.SetExpertMagicNumber(magic);
+   // Detect filling mode
+   long fillingMode = SymbolInfoInteger(m_symbol, SYMBOL_FILLING_MODE);
+   if((fillingMode & SYMBOL_FILLING_FOK) != 0)
+      m_fillingType = ORDER_FILLING_FOK;
+   else if((fillingMode & SYMBOL_FILLING_IOC) != 0)
+      m_fillingType = ORDER_FILLING_IOC;
+   else
+      m_fillingType = ORDER_FILLING_RETURN;
+
    ArrayResize(m_hiddenStops, 0);
    m_hiddenStopCount = 0;
 
@@ -2395,6 +2540,26 @@ bool CTrailingStop::Init(string symbol, long magic, ENUM_TRAILING_MODE mode,
 
    XAU_LogInfo(StringFormat("TrailingStop initialized: mode=%s distance=%.1f step=%.1f",
            EnumToString(m_mode), m_trailDistance, m_trailStep));
+   return true;
+}
+
+bool CTrailingStop::ModifyPositionSLTP(ulong ticket, double sl, double tp)
+{
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action   = TRADE_ACTION_SLTP;
+   request.symbol   = m_symbol;
+   request.position = ticket;
+   request.sl       = sl;
+   request.tp       = tp;
+
+   if(!OrderSend(request, result))
+      return false;
+   if(result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_PLACED)
+      return false;
    return true;
 }
 
@@ -2438,17 +2603,19 @@ void CTrailingStop::ManageTrailing()
 
    for(int i = m_hiddenStopCount - 1; i >= 0; i--)
    {
-      bool positionExists = m_position.SelectByTicket(m_hiddenStops[i].ticket);
+      bool positionExists = PositionSelectByTicket(m_hiddenStops[i].ticket);
       if(!positionExists)
          RemoveHiddenStop(m_hiddenStops[i].ticket);
    }
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(!m_position.SelectByIndex(i)) continue;
-      if(m_position.Magic() != m_magicNumber || m_position.Symbol() != m_symbol) continue;
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
 
-      ulong ticket = m_position.Ticket();
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string sym = PositionGetString(POSITION_SYMBOL);
+      if(magic != m_magicNumber || sym != m_symbol) continue;
 
       if(FindHiddenStop(ticket) < 0)
          AddHiddenStop(ticket);
@@ -2468,40 +2635,45 @@ void CTrailingStop::ManageTrailing()
 
 void CTrailingStop::TrailStandard(ulong ticket)
 {
-   if(!m_position.SelectByTicket(ticket)) return;
+   if(!PositionSelectByTicket(ticket)) return;
 
-   double openPrice = m_position.PriceOpen();
-   double currentSL = m_position.StopLoss();
-   double currentPrice = m_position.PriceCurrent();
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+   long   posType = PositionGetInteger(POSITION_TYPE);
    double trailPrice = XAU_PipsToPrice(m_trailDistance);
    double stepPrice = XAU_PipsToPrice(m_trailStep);
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   if(posType == POSITION_TYPE_BUY)
    {
       double newSL = currentPrice - trailPrice;
       if(newSL > openPrice && newSL > currentSL + stepPrice)
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
    }
-   else if(m_position.PositionType() == POSITION_TYPE_SELL)
+   else if(posType == POSITION_TYPE_SELL)
    {
       double newSL = currentPrice + trailPrice;
       if(newSL < openPrice && (currentSL == 0 || newSL < currentSL - stepPrice))
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
    }
 }
 
 void CTrailingStop::TrailHiddenLockIn(ulong ticket)
 {
-   if(!m_position.SelectByTicket(ticket)) return;
+   if(!PositionSelectByTicket(ticket)) return;
 
    int idx = FindHiddenStop(ticket);
    if(idx < 0) return;
 
-   double openPrice = m_position.PriceOpen();
-   double currentPrice = m_position.PriceCurrent();
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   long   posType = PositionGetInteger(POSITION_TYPE);
    double profitPips = 0;
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   if(posType == POSITION_TYPE_BUY)
       profitPips = XAU_PriceToPips(currentPrice - openPrice);
    else
       profitPips = XAU_PriceToPips(openPrice - currentPrice);
@@ -2510,7 +2682,7 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
    {
       m_hiddenStops[idx].lockInActive = true;
 
-      if(m_position.PositionType() == POSITION_TYPE_BUY)
+      if(posType == POSITION_TYPE_BUY)
          m_hiddenStops[idx].hiddenSL = openPrice + XAU_PipsToPrice(m_lockInPips);
       else
          m_hiddenStops[idx].hiddenSL = openPrice - XAU_PipsToPrice(m_lockInPips);
@@ -2523,7 +2695,7 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
    {
       double trailPrice = XAU_PipsToPrice(m_trailDistance);
 
-      if(m_position.PositionType() == POSITION_TYPE_BUY)
+      if(posType == POSITION_TYPE_BUY)
       {
          double newHiddenSL = currentPrice - trailPrice;
          if(newHiddenSL > m_hiddenStops[idx].hiddenSL)
@@ -2536,15 +2708,15 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
             m_hiddenStops[idx].hiddenSL = newHiddenSL;
       }
 
-      double serverSL = m_position.StopLoss();
+      double serverSL = currentSL;
       double hiddenSL = m_hiddenStops[idx].hiddenSL;
       double bigStep = XAU_PipsToPrice(m_trailDistance * 2);
 
-      if(m_position.PositionType() == POSITION_TYPE_BUY)
+      if(posType == POSITION_TYPE_BUY)
       {
          if(hiddenSL > serverSL + bigStep || serverSL < openPrice)
          {
-            m_trade.PositionModify(ticket, hiddenSL, m_position.TakeProfit());
+            ModifyPositionSLTP(ticket, hiddenSL, currentTP);
             XAU_LogDebug(StringFormat("Server SL updated (lock-in): ticket=%d SL=%.2f", ticket, hiddenSL));
          }
       }
@@ -2552,7 +2724,7 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
       {
          if((serverSL == 0 || hiddenSL < serverSL - bigStep) || serverSL > openPrice)
          {
-            m_trade.PositionModify(ticket, hiddenSL, m_position.TakeProfit());
+            ModifyPositionSLTP(ticket, hiddenSL, currentTP);
             XAU_LogDebug(StringFormat("Server SL updated (lock-in): ticket=%d SL=%.2f", ticket, hiddenSL));
          }
       }
@@ -2562,18 +2734,20 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
 
 void CTrailingStop::TrailJump(ulong ticket)
 {
-   if(!m_position.SelectByTicket(ticket)) return;
+   if(!PositionSelectByTicket(ticket)) return;
 
    int idx = FindHiddenStop(ticket);
    if(idx < 0) return;
 
-   double openPrice = m_position.PriceOpen();
-   double currentPrice = m_position.PriceCurrent();
-   double currentSL = m_position.StopLoss();
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   long   posType = PositionGetInteger(POSITION_TYPE);
    double jumpPrice = XAU_PipsToPrice(m_jumpSize);
    double profitPips = 0;
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   if(posType == POSITION_TYPE_BUY)
    {
       profitPips = XAU_PriceToPips(currentPrice - openPrice);
       int jumpsEarned = (int)(profitPips / m_jumpSize);
@@ -2582,7 +2756,7 @@ void CTrailingStop::TrailJump(ulong ticket)
          double newSL = openPrice + (jumpsEarned - 1) * jumpPrice;
          if(newSL > currentSL)
          {
-            m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+            ModifyPositionSLTP(ticket, newSL, currentTP);
             m_hiddenStops[idx].jumpCount = jumpsEarned;
             m_hiddenStops[idx].lastJumpLevel = newSL;
             XAU_LogDebug(StringFormat("Jump SL: ticket=%d jump #%d SL=%.2f",
@@ -2590,7 +2764,7 @@ void CTrailingStop::TrailJump(ulong ticket)
          }
       }
    }
-   else if(m_position.PositionType() == POSITION_TYPE_SELL)
+   else if(posType == POSITION_TYPE_SELL)
    {
       profitPips = XAU_PriceToPips(openPrice - currentPrice);
       int jumpsEarned = (int)(profitPips / m_jumpSize);
@@ -2599,7 +2773,7 @@ void CTrailingStop::TrailJump(ulong ticket)
          double newSL = openPrice - (jumpsEarned - 1) * jumpPrice;
          if(currentSL == 0 || newSL < currentSL)
          {
-            m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+            ModifyPositionSLTP(ticket, newSL, currentTP);
             m_hiddenStops[idx].jumpCount = jumpsEarned;
             m_hiddenStops[idx].lastJumpLevel = newSL;
             XAU_LogDebug(StringFormat("Jump SL: ticket=%d jump #%d SL=%.2f",
@@ -2611,14 +2785,16 @@ void CTrailingStop::TrailJump(ulong ticket)
 
 void CTrailingStop::TrailProgressive(ulong ticket)
 {
-   if(!m_position.SelectByTicket(ticket)) return;
+   if(!PositionSelectByTicket(ticket)) return;
 
-   double openPrice = m_position.PriceOpen();
-   double currentPrice = m_position.PriceCurrent();
-   double currentSL = m_position.StopLoss();
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   long   posType = PositionGetInteger(POSITION_TYPE);
    double profitPips = 0;
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   if(posType == POSITION_TYPE_BUY)
       profitPips = XAU_PriceToPips(currentPrice - openPrice);
    else
       profitPips = XAU_PriceToPips(openPrice - currentPrice);
@@ -2629,62 +2805,66 @@ void CTrailingStop::TrailProgressive(ulong ticket)
    double trailPrice = XAU_PipsToPrice(dynamicDistance);
    double stepPrice = XAU_PipsToPrice(m_trailStep);
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   if(posType == POSITION_TYPE_BUY)
    {
       double newSL = currentPrice - trailPrice;
       if(newSL > openPrice && newSL > currentSL + stepPrice)
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
    }
    else
    {
       double newSL = currentPrice + trailPrice;
       if(newSL < openPrice && (currentSL == 0 || newSL < currentSL - stepPrice))
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
    }
 }
 
 void CTrailingStop::TrailATR(ulong ticket)
 {
-   if(!m_position.SelectByTicket(ticket)) return;
+   if(!PositionSelectByTicket(ticket)) return;
 
    double atrValue = GetATRValue();
    if(atrValue == 0) return;
 
    double trailPrice = atrValue * m_atrMultiplier;
-   double openPrice = m_position.PriceOpen();
-   double currentPrice = m_position.PriceCurrent();
-   double currentSL = m_position.StopLoss();
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   long   posType = PositionGetInteger(POSITION_TYPE);
    double stepPrice = XAU_PipsToPrice(m_trailStep);
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   if(posType == POSITION_TYPE_BUY)
    {
       double newSL = currentPrice - trailPrice;
       if(newSL > openPrice && newSL > currentSL + stepPrice)
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
    }
    else
    {
       double newSL = currentPrice + trailPrice;
       if(newSL < openPrice && (currentSL == 0 || newSL < currentSL - stepPrice))
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
    }
 }
 
 void CTrailingStop::TrailStructure(ulong ticket)
 {
-   if(!m_position.SelectByTicket(ticket)) return;
+   if(!PositionSelectByTicket(ticket)) return;
 
-   double openPrice = m_position.PriceOpen();
-   double currentSL = m_position.StopLoss();
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   long   posType = PositionGetInteger(POSITION_TYPE);
    double buffer = XAU_PipsToPrice(5.0);
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   if(posType == POSITION_TYPE_BUY)
    {
       double swingLow = GetSwingLow(20);
       double newSL = swingLow - buffer;
       if(newSL > openPrice && newSL > currentSL + XAU_PipsToPrice(m_trailStep))
       {
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
          XAU_LogDebug(StringFormat("Structure trail BUY: SL moved to %.2f (swing low)", newSL));
       }
    }
@@ -2694,7 +2874,7 @@ void CTrailingStop::TrailStructure(ulong ticket)
       double newSL = swingHigh + buffer;
       if(newSL < openPrice && (currentSL == 0 || newSL < currentSL - XAU_PipsToPrice(m_trailStep)))
       {
-         m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
+         ModifyPositionSLTP(ticket, newSL, currentTP);
          XAU_LogDebug(StringFormat("Structure trail SELL: SL moved to %.2f (swing high)", newSL));
       }
    }
@@ -2705,12 +2885,13 @@ bool CTrailingStop::ShouldClosePosition(ulong ticket, double currentPrice)
    int idx = FindHiddenStop(ticket);
    if(idx < 0 || !m_hiddenStops[idx].lockInActive) return false;
 
-   if(!m_position.SelectByTicket(ticket)) return false;
+   if(!PositionSelectByTicket(ticket)) return false;
 
    double hiddenSL = m_hiddenStops[idx].hiddenSL;
    if(hiddenSL == 0) return false;
 
-   if(m_position.PositionType() == POSITION_TYPE_BUY)
+   long posType = PositionGetInteger(POSITION_TYPE);
+   if(posType == POSITION_TYPE_BUY)
       return (currentPrice <= hiddenSL);
    else
       return (currentPrice >= hiddenSL);
