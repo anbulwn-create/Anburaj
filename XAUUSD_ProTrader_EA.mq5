@@ -93,7 +93,7 @@ enum ENUM_ACCOUNT_TIER
 //+------------------------------------------------------------------+
 //| Utility Functions (must be declared before classes that use them) |
 //+------------------------------------------------------------------+
-void LogMessage(ENUM_LOG_LEVEL level, string message)
+void XAU_LogMessage(ENUM_LOG_LEVEL level, string message)
 {
    string prefix = "";
    switch(level)
@@ -107,24 +107,24 @@ void LogMessage(ENUM_LOG_LEVEL level, string message)
    Print(EA_NAME, " ", prefix, message);
 }
 
-void LogDebug(string msg)    { LogMessage(LOG_DEBUG, msg); }
-void LogInfo(string msg)     { LogMessage(LOG_INFO, msg); }
-void LogWarning(string msg)  { LogMessage(LOG_WARNING, msg); }
-void LogError(string msg)    { LogMessage(LOG_ERROR, msg); }
-void LogCritical(string msg) { LogMessage(LOG_CRITICAL, msg); }
+void XAU_LogDebug(string msg)    { XAU_LogMessage(LOG_DEBUG, msg); }
+void XAU_LogInfo(string msg)     { XAU_LogMessage(LOG_INFO, msg); }
+void XAU_LogWarning(string msg)  { XAU_LogMessage(LOG_WARNING, msg); }
+void XAU_LogError(string msg)    { XAU_LogMessage(LOG_ERROR, msg); }
+void XAU_LogCritical(string msg) { XAU_LogMessage(LOG_CRITICAL, msg); }
 
-double PipsToPrice(double pips)
+double XAU_PipsToPrice(double pips)
 {
    return pips * XAUUSD_PIP_SIZE;
 }
 
-double PriceToPips(double priceDistance)
+double XAU_PriceToPips(double priceDistance)
 {
    if(XAUUSD_PIP_SIZE == 0) return 0;
    return priceDistance / XAUUSD_PIP_SIZE;
 }
 
-double GetPipValue(double lotSize)
+double XAU_GetPipValue(double lotSize)
 {
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
@@ -222,7 +222,7 @@ bool IsNewBar(ENUM_TIMEFRAMES timeframe)
    return false;
 }
 
-double NormalizeLot(double lots)
+double XAU_NormalizeLot(double lots)
 {
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -238,11 +238,11 @@ double NormalizeLot(double lots)
    return lots;
 }
 
-double GetSpreadPips()
+double XAU_GetSpreadPips()
 {
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   return PriceToPips(ask - bid);
+   return XAU_PriceToPips(ask - bid);
 }
 
 double ArrayMaxCustom(const double &arr[], int count = -1)
@@ -459,7 +459,7 @@ bool CSMCAnalysis::Init(string symbol, ENUM_TIMEFRAMES tf, int lookback,
    ArrayResize(m_liquidityPools, 0);
    ArrayResize(m_swingPoints, 0);
 
-   LogInfo("SMC Analysis initialized: " + symbol + " " + EnumToString(tf));
+   XAU_LogInfo("SMC Analysis initialized: " + symbol + " " + EnumToString(tf));
    return true;
 }
 
@@ -728,7 +728,7 @@ void CSMCAnalysis::DetectFairValueGaps()
          fvg.touchCount = 0;
          fvg.isValid = true;
          fvg.isBullish = true;
-         fvg.strength = (int)MathMin(10, PriceToPips(low3 - high1));
+         fvg.strength = (int)MathMin(10, XAU_PriceToPips(low3 - high1));
 
          if(count < m_maxZones)
          {
@@ -747,7 +747,7 @@ void CSMCAnalysis::DetectFairValueGaps()
          fvg.touchCount = 0;
          fvg.isValid = true;
          fvg.isBullish = false;
-         fvg.strength = (int)MathMin(10, PriceToPips(low1 - high3));
+         fvg.strength = (int)MathMin(10, XAU_PriceToPips(low1 - high3));
 
          if(count < m_maxZones)
          {
@@ -791,7 +791,7 @@ void CSMCAnalysis::DetectLiquidityPools()
 {
    ArrayResize(m_liquidityPools, 0);
    int count = 0;
-   double tolerance = PipsToPrice(5.0);
+   double tolerance = XAU_PipsToPrice(5.0);
 
    for(int i = 0; i < ArraySize(m_swingPoints) - 1; i++)
    {
@@ -905,14 +905,14 @@ bool CSMCAnalysis::DetectBOS()
    if(m_isBullishStructure && currentClose > m_lastSwingHigh)
    {
       m_bosDetected = true;
-      LogDebug("Bullish BOS detected - price broke above " + DoubleToString(m_lastSwingHigh, 2));
+      XAU_LogDebug("Bullish BOS detected - price broke above " + DoubleToString(m_lastSwingHigh, 2));
       return true;
    }
 
    if(!m_isBullishStructure && currentClose < m_lastSwingLow)
    {
       m_bosDetected = true;
-      LogDebug("Bearish BOS detected - price broke below " + DoubleToString(m_lastSwingLow, 2));
+      XAU_LogDebug("Bearish BOS detected - price broke below " + DoubleToString(m_lastSwingLow, 2));
       return true;
    }
 
@@ -928,7 +928,7 @@ bool CSMCAnalysis::DetectCHoCH()
    {
       m_chochDetected = true;
       m_isBullishStructure = true;
-      LogDebug("Bullish CHoCH detected - structure shift to bullish");
+      XAU_LogDebug("Bullish CHoCH detected - structure shift to bullish");
       return true;
    }
 
@@ -936,7 +936,7 @@ bool CSMCAnalysis::DetectCHoCH()
    {
       m_chochDetected = true;
       m_isBullishStructure = false;
-      LogDebug("Bearish CHoCH detected - structure shift to bearish");
+      XAU_LogDebug("Bearish CHoCH detected - structure shift to bearish");
       return true;
    }
 
@@ -1062,12 +1062,12 @@ bool CSignalEngine::Init(string symbol, ENUM_TIMEFRAMES lowerTF, ENUM_TIMEFRAMES
       m_hEmaFastHigher == INVALID_HANDLE || m_hEmaSlowHigher == INVALID_HANDLE ||
       m_hRsi == INVALID_HANDLE)
    {
-      LogError("SignalEngine: Failed to create indicator handles. Error: " + IntegerToString(GetLastError()));
+      XAU_LogError("SignalEngine: Failed to create indicator handles. Error: " + IntegerToString(GetLastError()));
       return false;
    }
 
    m_initialized = true;
-   LogInfo("SignalEngine initialized: " + symbol + " LTF=" + EnumToString(lowerTF) + " HTF=" + EnumToString(higherTF));
+   XAU_LogInfo("SignalEngine initialized: " + symbol + " LTF=" + EnumToString(lowerTF) + " HTF=" + EnumToString(higherTF));
    return true;
 }
 
@@ -1546,7 +1546,7 @@ bool CRiskManager::Init(double riskPercent, double maxDD, double dailyLimit,
    m_equityHistoryIdx = 0;
    m_equityHistoryFill = 0;
 
-   LogInfo(StringFormat("RiskManager initialized: Risk=%.1f%% MaxDD=%.1f%% DailyLimit=%.1f%% MinBal=%.0f",
+   XAU_LogInfo(StringFormat("RiskManager initialized: Risk=%.1f%% MaxDD=%.1f%% DailyLimit=%.1f%% MinBal=%.0f",
            m_riskPercent, m_maxDrawdownPercent, m_dailyLossLimit, m_minBalance));
    return true;
 }
@@ -1571,7 +1571,7 @@ double CRiskManager::CalculateLotSize(double slPips)
          riskAmount = balance * kellyFraction;
    }
 
-   double pipValue = GetPipValue(1.0);
+   double pipValue = XAU_GetPipValue(1.0);
    if(pipValue <= 0) return 0;
 
    double lots = riskAmount / (slPips * pipValue);
@@ -1579,7 +1579,7 @@ double CRiskManager::CalculateLotSize(double slPips)
    if(m_consecutiveLosses >= m_maxConsecLosses)
    {
       lots *= m_lotReductionFactor;
-      LogWarning(StringFormat("Lot reduced due to %d consecutive losses: %.2f -> %.2f",
+      XAU_LogWarning(StringFormat("Lot reduced due to %d consecutive losses: %.2f -> %.2f",
                  m_consecutiveLosses, lots / m_lotReductionFactor, lots));
    }
 
@@ -1587,12 +1587,12 @@ double CRiskManager::CalculateLotSize(double slPips)
    double maxLot = GetTierMaxLot(tier);
    lots = MathMin(lots, maxLot);
 
-   return NormalizeLot(lots);
+   return XAU_NormalizeLot(lots);
 }
 
 double CRiskManager::CalculateLotSizeFixed(double lots)
 {
-   return NormalizeLot(lots);
+   return XAU_NormalizeLot(lots);
 }
 
 bool CRiskManager::CanTrade()
@@ -1683,7 +1683,7 @@ void CRiskManager::RecordWin(double profit)
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    if(balance > m_peakBalance) m_peakBalance = balance;
 
-   LogDebug(StringFormat("Win recorded: +%.2f | Daily P&L: %.2f | Consec losses: 0", profit, m_dailyPnL));
+   XAU_LogDebug(StringFormat("Win recorded: +%.2f | Daily P&L: %.2f | Consec losses: 0", profit, m_dailyPnL));
 }
 
 void CRiskManager::RecordLoss(double loss)
@@ -1694,7 +1694,7 @@ void CRiskManager::RecordLoss(double loss)
    int losingTrades = m_totalTrades - m_winningTrades;
    m_avgLoss = ((m_avgLoss * (losingTrades - 1)) + MathAbs(loss)) / losingTrades;
 
-   LogDebug(StringFormat("Loss recorded: %.2f | Daily P&L: %.2f | Consec losses: %d",
+   XAU_LogDebug(StringFormat("Loss recorded: %.2f | Daily P&L: %.2f | Consec losses: %d",
             loss, m_dailyPnL, m_consecutiveLosses));
 }
 
@@ -1775,7 +1775,7 @@ void CRiskManager::ResetDailyCounters()
 {
    m_dailyPnL = 0;
    m_startingBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-   LogInfo("Daily counters reset. Starting balance: " + DoubleToString(m_startingBalance, 2));
+   XAU_LogInfo("Daily counters reset. Starting balance: " + DoubleToString(m_startingBalance, 2));
 }
 
 void CRiskManager::Update()
@@ -1910,11 +1910,11 @@ bool CTradeManager::Init(string symbol, long magic, string comment,
 
    if(!m_symbolInfo.Name(symbol))
    {
-      LogError("TradeManager: Failed to set symbol info for " + symbol);
+      XAU_LogError("TradeManager: Failed to set symbol info for " + symbol);
       return false;
    }
 
-   LogInfo(StringFormat("TradeManager initialized: %s Magic=%d MaxSpread=%.1f MaxSlip=%d MaxPos=%d",
+   XAU_LogInfo(StringFormat("TradeManager initialized: %s Magic=%d MaxSpread=%.1f MaxSlip=%d MaxPos=%d",
            symbol, magic, maxSpread, maxSlip, maxPos));
    return true;
 }
@@ -1951,7 +1951,7 @@ bool CTradeManager::IsSpreadOK()
    double spreadPips = GetCurrentSpreadPips();
    if(spreadPips > m_maxSpreadPips)
    {
-      LogDebug(StringFormat("Spread too high: %.1f pips (max: %.1f)", spreadPips, m_maxSpreadPips));
+      XAU_LogDebug(StringFormat("Spread too high: %.1f pips (max: %.1f)", spreadPips, m_maxSpreadPips));
       return false;
    }
    return true;
@@ -1996,13 +1996,13 @@ bool CTradeManager::OpenBuy(double lots, double sl, double tp, string tradeComme
       if(m_trade.Buy(lots, m_symbol, ask, sl, tp, tradeComment))
       {
          m_lastTradeTime = TimeCurrent();
-         LogInfo(StringFormat("BUY opened: %.2f lots @ %.2f SL=%.2f TP=%.2f",
+         XAU_LogInfo(StringFormat("BUY opened: %.2f lots @ %.2f SL=%.2f TP=%.2f",
                  lots, ask, sl, tp));
          return true;
       }
 
       int error = (int)m_trade.ResultRetcode();
-      LogWarning(StringFormat("BUY attempt %d failed: %d - %s",
+      XAU_LogWarning(StringFormat("BUY attempt %d failed: %d - %s",
                  attempt + 1, error, m_trade.ResultRetcodeDescription()));
 
       if(error == TRADE_RETCODE_NO_MONEY || error == TRADE_RETCODE_MARKET_CLOSED)
@@ -2013,7 +2013,7 @@ bool CTradeManager::OpenBuy(double lots, double sl, double tp, string tradeComme
       ask = m_symbolInfo.Ask();
    }
 
-   LogError("BUY order failed after all retries");
+   XAU_LogError("BUY order failed after all retries");
    return false;
 }
 
@@ -2029,13 +2029,13 @@ bool CTradeManager::OpenSell(double lots, double sl, double tp, string tradeComm
       if(m_trade.Sell(lots, m_symbol, bid, sl, tp, tradeComment))
       {
          m_lastTradeTime = TimeCurrent();
-         LogInfo(StringFormat("SELL opened: %.2f lots @ %.2f SL=%.2f TP=%.2f",
+         XAU_LogInfo(StringFormat("SELL opened: %.2f lots @ %.2f SL=%.2f TP=%.2f",
                  lots, bid, sl, tp));
          return true;
       }
 
       int error = (int)m_trade.ResultRetcode();
-      LogWarning(StringFormat("SELL attempt %d failed: %d - %s",
+      XAU_LogWarning(StringFormat("SELL attempt %d failed: %d - %s",
                  attempt + 1, error, m_trade.ResultRetcodeDescription()));
 
       if(error == TRADE_RETCODE_NO_MONEY || error == TRADE_RETCODE_MARKET_CLOSED)
@@ -2046,7 +2046,7 @@ bool CTradeManager::OpenSell(double lots, double sl, double tp, string tradeComm
       bid = m_symbolInfo.Bid();
    }
 
-   LogError("SELL order failed after all retries");
+   XAU_LogError("SELL order failed after all retries");
    return false;
 }
 
@@ -2054,7 +2054,7 @@ bool CTradeManager::ModifyPosition(ulong ticket, double sl, double tp)
 {
    if(!m_trade.PositionModify(ticket, sl, tp))
    {
-      LogWarning(StringFormat("Position modify failed: ticket=%d error=%d",
+      XAU_LogWarning(StringFormat("Position modify failed: ticket=%d error=%d",
                  ticket, m_trade.ResultRetcode()));
       return false;
    }
@@ -2065,11 +2065,11 @@ bool CTradeManager::ClosePosition(ulong ticket)
 {
    if(!m_trade.PositionClose(ticket))
    {
-      LogWarning(StringFormat("Position close failed: ticket=%d error=%d",
+      XAU_LogWarning(StringFormat("Position close failed: ticket=%d error=%d",
                  ticket, m_trade.ResultRetcode()));
       return false;
    }
-   LogInfo(StringFormat("Position closed: ticket=%d", ticket));
+   XAU_LogInfo(StringFormat("Position closed: ticket=%d", ticket));
    return true;
 }
 
@@ -2095,19 +2095,19 @@ bool CTradeManager::PartialClose(ulong ticket, double percent)
    if(!m_position.SelectByTicket(ticket)) return false;
 
    double volume = m_position.Volume();
-   double closeVolume = NormalizeLot(volume * (percent / 100.0));
+   double closeVolume = XAU_NormalizeLot(volume * (percent / 100.0));
 
    if(closeVolume < SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN))
       return false;
 
    if(m_trade.PositionClosePartial(ticket, closeVolume))
    {
-      LogInfo(StringFormat("Partial close: ticket=%d volume=%.2f (%.0f%%)",
+      XAU_LogInfo(StringFormat("Partial close: ticket=%d volume=%.2f (%.0f%%)",
               ticket, closeVolume, percent));
       return true;
    }
 
-   LogWarning(StringFormat("Partial close failed: ticket=%d error=%d",
+   XAU_LogWarning(StringFormat("Partial close failed: ticket=%d error=%d",
               ticket, m_trade.ResultRetcode()));
    return false;
 }
@@ -2127,23 +2127,23 @@ void CTradeManager::ManageBreakEven()
 
       if(m_position.PositionType() == POSITION_TYPE_BUY)
       {
-         profitPips = PriceToPips(currentPrice - openPrice);
-         double newSL = openPrice + PipsToPrice(m_breakEvenOffset);
+         profitPips = XAU_PriceToPips(currentPrice - openPrice);
+         double newSL = openPrice + XAU_PipsToPrice(m_breakEvenOffset);
          if(profitPips >= m_breakEvenPips && currentSL < openPrice)
          {
             ModifyPosition(m_position.Ticket(), newSL, m_position.TakeProfit());
-            LogDebug(StringFormat("Break-even set for BUY ticket %d at %.2f",
+            XAU_LogDebug(StringFormat("Break-even set for BUY ticket %d at %.2f",
                      m_position.Ticket(), newSL));
          }
       }
       else if(m_position.PositionType() == POSITION_TYPE_SELL)
       {
-         profitPips = PriceToPips(openPrice - currentPrice);
-         double newSL = openPrice - PipsToPrice(m_breakEvenOffset);
+         profitPips = XAU_PriceToPips(openPrice - currentPrice);
+         double newSL = openPrice - XAU_PipsToPrice(m_breakEvenOffset);
          if(profitPips >= m_breakEvenPips && (currentSL > openPrice || currentSL == 0))
          {
             ModifyPosition(m_position.Ticket(), newSL, m_position.TakeProfit());
-            LogDebug(StringFormat("Break-even set for SELL ticket %d at %.2f",
+            XAU_LogDebug(StringFormat("Break-even set for SELL ticket %d at %.2f",
                      m_position.Ticket(), newSL));
          }
       }
@@ -2163,9 +2163,9 @@ void CTradeManager::ManagePartialClose()
       ulong ticket = m_position.Ticket();
 
       if(m_position.PositionType() == POSITION_TYPE_BUY)
-         profitPips = PriceToPips(currentPrice - openPrice);
+         profitPips = XAU_PriceToPips(currentPrice - openPrice);
       else
-         profitPips = PriceToPips(openPrice - currentPrice);
+         profitPips = XAU_PriceToPips(openPrice - currentPrice);
 
       if(profitPips >= m_partialClosePips)
       {
@@ -2251,7 +2251,7 @@ double CTradeManager::GetCurrentSpreadPips()
 {
    m_symbolInfo.RefreshRates();
    double spread = m_symbolInfo.Ask() - m_symbolInfo.Bid();
-   return PriceToPips(spread);
+   return XAU_PriceToPips(spread);
 }
 
 ulong CTradeManager::GetLastTicket()
@@ -2388,12 +2388,12 @@ bool CTrailingStop::Init(string symbol, long magic, ENUM_TRAILING_MODE mode,
       m_atrHandle = iATR(m_symbol, m_timeframe, m_atrPeriod);
       if(m_atrHandle == INVALID_HANDLE)
       {
-         LogError("TrailingStop: Failed to create ATR handle");
+         XAU_LogError("TrailingStop: Failed to create ATR handle");
          return false;
       }
    }
 
-   LogInfo(StringFormat("TrailingStop initialized: mode=%s distance=%.1f step=%.1f",
+   XAU_LogInfo(StringFormat("TrailingStop initialized: mode=%s distance=%.1f step=%.1f",
            EnumToString(m_mode), m_trailDistance, m_trailStep));
    return true;
 }
@@ -2473,8 +2473,8 @@ void CTrailingStop::TrailStandard(ulong ticket)
    double openPrice = m_position.PriceOpen();
    double currentSL = m_position.StopLoss();
    double currentPrice = m_position.PriceCurrent();
-   double trailPrice = PipsToPrice(m_trailDistance);
-   double stepPrice = PipsToPrice(m_trailStep);
+   double trailPrice = XAU_PipsToPrice(m_trailDistance);
+   double stepPrice = XAU_PipsToPrice(m_trailStep);
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
    {
@@ -2502,26 +2502,26 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
    double profitPips = 0;
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
-      profitPips = PriceToPips(currentPrice - openPrice);
+      profitPips = XAU_PriceToPips(currentPrice - openPrice);
    else
-      profitPips = PriceToPips(openPrice - currentPrice);
+      profitPips = XAU_PriceToPips(openPrice - currentPrice);
 
    if(profitPips >= m_lockInThreshold && !m_hiddenStops[idx].lockInActive)
    {
       m_hiddenStops[idx].lockInActive = true;
 
       if(m_position.PositionType() == POSITION_TYPE_BUY)
-         m_hiddenStops[idx].hiddenSL = openPrice + PipsToPrice(m_lockInPips);
+         m_hiddenStops[idx].hiddenSL = openPrice + XAU_PipsToPrice(m_lockInPips);
       else
-         m_hiddenStops[idx].hiddenSL = openPrice - PipsToPrice(m_lockInPips);
+         m_hiddenStops[idx].hiddenSL = openPrice - XAU_PipsToPrice(m_lockInPips);
 
-      LogDebug(StringFormat("Lock-in activated: ticket=%d hidden SL=%.2f",
+      XAU_LogDebug(StringFormat("Lock-in activated: ticket=%d hidden SL=%.2f",
                ticket, m_hiddenStops[idx].hiddenSL));
    }
 
    if(m_hiddenStops[idx].lockInActive)
    {
-      double trailPrice = PipsToPrice(m_trailDistance);
+      double trailPrice = XAU_PipsToPrice(m_trailDistance);
 
       if(m_position.PositionType() == POSITION_TYPE_BUY)
       {
@@ -2538,14 +2538,14 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
 
       double serverSL = m_position.StopLoss();
       double hiddenSL = m_hiddenStops[idx].hiddenSL;
-      double bigStep = PipsToPrice(m_trailDistance * 2);
+      double bigStep = XAU_PipsToPrice(m_trailDistance * 2);
 
       if(m_position.PositionType() == POSITION_TYPE_BUY)
       {
          if(hiddenSL > serverSL + bigStep || serverSL < openPrice)
          {
             m_trade.PositionModify(ticket, hiddenSL, m_position.TakeProfit());
-            LogDebug(StringFormat("Server SL updated (lock-in): ticket=%d SL=%.2f", ticket, hiddenSL));
+            XAU_LogDebug(StringFormat("Server SL updated (lock-in): ticket=%d SL=%.2f", ticket, hiddenSL));
          }
       }
       else
@@ -2553,7 +2553,7 @@ void CTrailingStop::TrailHiddenLockIn(ulong ticket)
          if((serverSL == 0 || hiddenSL < serverSL - bigStep) || serverSL > openPrice)
          {
             m_trade.PositionModify(ticket, hiddenSL, m_position.TakeProfit());
-            LogDebug(StringFormat("Server SL updated (lock-in): ticket=%d SL=%.2f", ticket, hiddenSL));
+            XAU_LogDebug(StringFormat("Server SL updated (lock-in): ticket=%d SL=%.2f", ticket, hiddenSL));
          }
       }
    }
@@ -2570,12 +2570,12 @@ void CTrailingStop::TrailJump(ulong ticket)
    double openPrice = m_position.PriceOpen();
    double currentPrice = m_position.PriceCurrent();
    double currentSL = m_position.StopLoss();
-   double jumpPrice = PipsToPrice(m_jumpSize);
+   double jumpPrice = XAU_PipsToPrice(m_jumpSize);
    double profitPips = 0;
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
    {
-      profitPips = PriceToPips(currentPrice - openPrice);
+      profitPips = XAU_PriceToPips(currentPrice - openPrice);
       int jumpsEarned = (int)(profitPips / m_jumpSize);
       if(jumpsEarned > m_hiddenStops[idx].jumpCount && jumpsEarned > 0)
       {
@@ -2585,14 +2585,14 @@ void CTrailingStop::TrailJump(ulong ticket)
             m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
             m_hiddenStops[idx].jumpCount = jumpsEarned;
             m_hiddenStops[idx].lastJumpLevel = newSL;
-            LogDebug(StringFormat("Jump SL: ticket=%d jump #%d SL=%.2f",
+            XAU_LogDebug(StringFormat("Jump SL: ticket=%d jump #%d SL=%.2f",
                      ticket, jumpsEarned, newSL));
          }
       }
    }
    else if(m_position.PositionType() == POSITION_TYPE_SELL)
    {
-      profitPips = PriceToPips(openPrice - currentPrice);
+      profitPips = XAU_PriceToPips(openPrice - currentPrice);
       int jumpsEarned = (int)(profitPips / m_jumpSize);
       if(jumpsEarned > m_hiddenStops[idx].jumpCount && jumpsEarned > 0)
       {
@@ -2602,7 +2602,7 @@ void CTrailingStop::TrailJump(ulong ticket)
             m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
             m_hiddenStops[idx].jumpCount = jumpsEarned;
             m_hiddenStops[idx].lastJumpLevel = newSL;
-            LogDebug(StringFormat("Jump SL: ticket=%d jump #%d SL=%.2f",
+            XAU_LogDebug(StringFormat("Jump SL: ticket=%d jump #%d SL=%.2f",
                      ticket, jumpsEarned, newSL));
          }
       }
@@ -2619,15 +2619,15 @@ void CTrailingStop::TrailProgressive(ulong ticket)
    double profitPips = 0;
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
-      profitPips = PriceToPips(currentPrice - openPrice);
+      profitPips = XAU_PriceToPips(currentPrice - openPrice);
    else
-      profitPips = PriceToPips(openPrice - currentPrice);
+      profitPips = XAU_PriceToPips(openPrice - currentPrice);
 
    if(profitPips < m_progressiveStart) return;
 
    double dynamicDistance = CalculateProgressiveDistance(profitPips);
-   double trailPrice = PipsToPrice(dynamicDistance);
-   double stepPrice = PipsToPrice(m_trailStep);
+   double trailPrice = XAU_PipsToPrice(dynamicDistance);
+   double stepPrice = XAU_PipsToPrice(m_trailStep);
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
    {
@@ -2654,7 +2654,7 @@ void CTrailingStop::TrailATR(ulong ticket)
    double openPrice = m_position.PriceOpen();
    double currentPrice = m_position.PriceCurrent();
    double currentSL = m_position.StopLoss();
-   double stepPrice = PipsToPrice(m_trailStep);
+   double stepPrice = XAU_PipsToPrice(m_trailStep);
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
    {
@@ -2676,26 +2676,26 @@ void CTrailingStop::TrailStructure(ulong ticket)
 
    double openPrice = m_position.PriceOpen();
    double currentSL = m_position.StopLoss();
-   double buffer = PipsToPrice(5.0);
+   double buffer = XAU_PipsToPrice(5.0);
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
    {
       double swingLow = GetSwingLow(20);
       double newSL = swingLow - buffer;
-      if(newSL > openPrice && newSL > currentSL + PipsToPrice(m_trailStep))
+      if(newSL > openPrice && newSL > currentSL + XAU_PipsToPrice(m_trailStep))
       {
          m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
-         LogDebug(StringFormat("Structure trail BUY: SL moved to %.2f (swing low)", newSL));
+         XAU_LogDebug(StringFormat("Structure trail BUY: SL moved to %.2f (swing low)", newSL));
       }
    }
    else
    {
       double swingHigh = GetSwingHigh(20);
       double newSL = swingHigh + buffer;
-      if(newSL < openPrice && (currentSL == 0 || newSL < currentSL - PipsToPrice(m_trailStep)))
+      if(newSL < openPrice && (currentSL == 0 || newSL < currentSL - XAU_PipsToPrice(m_trailStep)))
       {
          m_trade.PositionModify(ticket, newSL, m_position.TakeProfit());
-         LogDebug(StringFormat("Structure trail SELL: SL moved to %.2f (swing high)", newSL));
+         XAU_LogDebug(StringFormat("Structure trail SELL: SL moved to %.2f (swing high)", newSL));
       }
    }
 }
@@ -2910,7 +2910,7 @@ bool CNewsFilter::Init(bool enabled, int minBefore, int minAfter)
 
    BuildNewsSchedule();
 
-   LogInfo(StringFormat("NewsFilter initialized: enabled=%s before=%dmin after=%dmin",
+   XAU_LogInfo(StringFormat("NewsFilter initialized: enabled=%s before=%dmin after=%dmin",
            enabled ? "true" : "false", minBefore, minAfter));
    return true;
 }
@@ -3295,7 +3295,7 @@ int OnInit()
    //--- Validate symbol
    if(StringFind(_Symbol, "XAU") < 0 && StringFind(_Symbol, "GOLD") < 0)
    {
-      LogWarning("This EA is designed for XAUUSD/Gold. Current symbol: " + _Symbol);
+      XAU_LogWarning("This EA is designed for XAUUSD/Gold. Current symbol: " + _Symbol);
    }
 
    //--- Initialize SMC Analysis
@@ -3303,7 +3303,7 @@ int OnInit()
    {
       if(!g_smcAnalysis.Init(_Symbol, InpLowerTF, InpSMCLookback, 3, 20, 500))
       {
-         LogError("Failed to initialize SMC Analysis");
+         XAU_LogError("Failed to initialize SMC Analysis");
          return INIT_FAILED;
       }
    }
@@ -3313,7 +3313,7 @@ int OnInit()
                             InpEMAFastPeriod, InpEMASlowPeriod,
                             InpRSIPeriod, InpRSIOverbought, InpRSIOversold))
    {
-      LogError("Failed to initialize Signal Engine");
+      XAU_LogError("Failed to initialize Signal Engine");
       return INIT_FAILED;
    }
    if(InpUseSMC)
@@ -3324,7 +3324,7 @@ int OnInit()
    if(!g_riskManager.Init(InpRiskPercent, InpMaxDrawdown, InpDailyLossLimit,
                            InpMinBalance, InpMaxConsecLoss, InpLotReduction))
    {
-      LogError("Failed to initialize Risk Manager");
+      XAU_LogError("Failed to initialize Risk Manager");
       return INIT_FAILED;
    }
    g_riskManager.SetKellyCriterion(InpUseKelly);
@@ -3335,7 +3335,7 @@ int OnInit()
    if(!g_tradeManager.Init(_Symbol, InpMagicNumber, InpEAComment,
                             InpMaxSpread, InpMaxSlippage, InpMaxPositions))
    {
-      LogError("Failed to initialize Trade Manager");
+      XAU_LogError("Failed to initialize Trade Manager");
       return INIT_FAILED;
    }
    g_tradeManager.SetBreakEven(InpBreakEvenPips, InpBreakEvenOffset);
@@ -3348,7 +3348,7 @@ int OnInit()
    //--- Initialize Trailing Stop
    if(!g_trailingStop.Init(_Symbol, InpMagicNumber, InpTrailMode, InpLowerTF))
    {
-      LogError("Failed to initialize Trailing Stop");
+      XAU_LogError("Failed to initialize Trailing Stop");
       return INIT_FAILED;
    }
    g_trailingStop.SetTrailParams(InpTrailDistance, InpTrailStep);
@@ -3360,7 +3360,7 @@ int OnInit()
    //--- Initialize News Filter
    if(!g_newsFilter.Init(InpNewsFilter, InpNewsBefore, InpNewsAfter))
    {
-      LogError("Failed to initialize News Filter");
+      XAU_LogError("Failed to initialize News Filter");
       return INIT_FAILED;
    }
    g_newsFilter.SetFridayFilter(InpFilterFriday, InpFridayEndHour);
@@ -3375,8 +3375,8 @@ int OnInit()
 
    g_initialized = true;
    g_eaStatus = "Active";
-   LogInfo("=== " + EA_NAME + " v" + EA_VERSION + " initialized successfully ===");
-   LogInfo(StringFormat("Account: %.2f %s | Leverage: 1:%d",
+   XAU_LogInfo("=== " + EA_NAME + " v" + EA_VERSION + " initialized successfully ===");
+   XAU_LogInfo(StringFormat("Account: %.2f %s | Leverage: 1:%d",
            AccountInfoDouble(ACCOUNT_BALANCE),
            AccountInfoString(ACCOUNT_CURRENCY),
            (int)AccountInfoInteger(ACCOUNT_LEVERAGE)));
@@ -3396,8 +3396,8 @@ void OnDeinit(const int reason)
 
    ObjectsDeleteAll(0, "EA_");
 
-   LogInfo("=== " + EA_NAME + " stopped ===");
-   LogInfo(StringFormat("Reason: %d | Total trades: %d | Total P&L: %.2f",
+   XAU_LogInfo("=== " + EA_NAME + " stopped ===");
+   XAU_LogInfo(StringFormat("Reason: %d | Total trades: %d | Total P&L: %.2f",
            reason, g_totalTrades, g_totalProfit));
 
    g_initialized = false;
@@ -3518,7 +3518,7 @@ void ManageExistingPositions()
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       if(g_trailingStop.ShouldClosePosition(tickets[i], bid))
       {
-         LogInfo(StringFormat("Hidden SL hit - closing position %d", tickets[i]));
+         XAU_LogInfo(StringFormat("Hidden SL hit - closing position %d", tickets[i]));
          g_tradeManager.ClosePosition(tickets[i]);
       }
    }
@@ -3547,7 +3547,7 @@ void ExecuteTrade(SignalResult &signal)
          double structureSLDist = ask - signal.suggestedSL;
          if(structureSLDist > 0)
          {
-            slPips = PriceToPips(structureSLDist);
+            slPips = XAU_PriceToPips(structureSLDist);
             usedStructureSL = true;
          }
       }
@@ -3556,7 +3556,7 @@ void ExecuteTrade(SignalResult &signal)
          double structureSLDist = signal.suggestedSL - bid;
          if(structureSLDist > 0)
          {
-            slPips = PriceToPips(structureSLDist);
+            slPips = XAU_PriceToPips(structureSLDist);
             usedStructureSL = true;
          }
       }
@@ -3569,7 +3569,7 @@ void ExecuteTrade(SignalResult &signal)
          double structureTPDist = signal.suggestedTP - ask;
          if(structureTPDist > 0)
          {
-            tpPips = PriceToPips(structureTPDist);
+            tpPips = XAU_PriceToPips(structureTPDist);
             usedStructureTP = true;
          }
       }
@@ -3578,7 +3578,7 @@ void ExecuteTrade(SignalResult &signal)
          double structureTPDist = bid - signal.suggestedTP;
          if(structureTPDist > 0)
          {
-            tpPips = PriceToPips(structureTPDist);
+            tpPips = XAU_PriceToPips(structureTPDist);
             usedStructureTP = true;
          }
       }
@@ -3587,7 +3587,7 @@ void ExecuteTrade(SignalResult &signal)
    //--- Validate risk-reward ratio
    if(!g_riskManager.ValidateRiskReward(slPips, tpPips))
    {
-      LogDebug(StringFormat("Trade rejected: R:R ratio %.2f below minimum %.2f",
+      XAU_LogDebug(StringFormat("Trade rejected: R:R ratio %.2f below minimum %.2f",
                tpPips / slPips, InpMinRiskReward));
       return;
    }
@@ -3596,7 +3596,7 @@ void ExecuteTrade(SignalResult &signal)
    double lots = g_riskManager.CalculateLotSize(slPips);
    if(lots <= 0)
    {
-      LogWarning("Lot size calculation returned 0 - trade skipped");
+      XAU_LogWarning("Lot size calculation returned 0 - trade skipped");
       return;
    }
 
@@ -3605,8 +3605,8 @@ void ExecuteTrade(SignalResult &signal)
 
    if(signal.signal == SIGNAL_BUY)
    {
-      slPrice = ask - PipsToPrice(slPips);
-      tpPrice = ask + PipsToPrice(tpPips);
+      slPrice = ask - XAU_PipsToPrice(slPips);
+      tpPrice = ask + XAU_PipsToPrice(tpPips);
 
       if(g_tradeManager.OpenBuy(lots, slPrice, tpPrice, comment))
       {
@@ -3618,7 +3618,7 @@ void ExecuteTrade(SignalResult &signal)
             g_smcAnalysis.ConsumeFVG(price);
             g_smcAnalysis.ConsumeLiquiditySweep(price);
          }
-         LogInfo(StringFormat("BUY executed: %.2f lots | SL=%.2f%s | TP=%.2f%s | Strength=%d | %s",
+         XAU_LogInfo(StringFormat("BUY executed: %.2f lots | SL=%.2f%s | TP=%.2f%s | Strength=%d | %s",
                  lots, slPrice, usedStructureSL ? " (SMC)" : "",
                  tpPrice, usedStructureTP ? " (SMC)" : "",
                  signal.strength, signal.reason));
@@ -3626,8 +3626,8 @@ void ExecuteTrade(SignalResult &signal)
    }
    else if(signal.signal == SIGNAL_SELL)
    {
-      slPrice = bid + PipsToPrice(slPips);
-      tpPrice = bid - PipsToPrice(tpPips);
+      slPrice = bid + XAU_PipsToPrice(slPips);
+      tpPrice = bid - XAU_PipsToPrice(tpPips);
 
       if(g_tradeManager.OpenSell(lots, slPrice, tpPrice, comment))
       {
@@ -3639,7 +3639,7 @@ void ExecuteTrade(SignalResult &signal)
             g_smcAnalysis.ConsumeFVG(price);
             g_smcAnalysis.ConsumeLiquiditySweep(price);
          }
-         LogInfo(StringFormat("SELL executed: %.2f lots | SL=%.2f%s | TP=%.2f%s | Strength=%d | %s",
+         XAU_LogInfo(StringFormat("SELL executed: %.2f lots | SL=%.2f%s | TP=%.2f%s | Strength=%d | %s",
                  lots, slPrice, usedStructureSL ? " (SMC)" : "",
                  tpPrice, usedStructureTP ? " (SMC)" : "",
                  signal.strength, signal.reason));
@@ -3809,7 +3809,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                   else
                      g_riskManager.RecordLoss(profit);
 
-                  LogInfo(StringFormat("Trade closed: P&L=%.2f | Total P&L=%.2f | Consec Losses=%d",
+                  XAU_LogInfo(StringFormat("Trade closed: P&L=%.2f | Total P&L=%.2f | Consec Losses=%d",
                           profit, g_totalProfit, g_riskManager.GetConsecutiveLosses()));
                }
             }
