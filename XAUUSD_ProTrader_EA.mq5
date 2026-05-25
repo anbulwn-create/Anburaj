@@ -29,8 +29,8 @@ input int      InpEMAFast        = 21;          // Fast EMA period
 input int      InpEMASlow        = 50;          // Slow EMA period
 input int      InpRSIPeriod      = 14;          // RSI period
 input double   InpRSIBuyMin      = 40.0;        // RSI min for BUY
-input double   InpRSIBuyMax      = 70.0;        // RSI max for BUY
-input double   InpRSISellMin     = 30.0;        // RSI min for SELL
+input double   InpRSIBuyMax      = 75.0;        // RSI max for BUY
+input double   InpRSISellMin     = 25.0;        // RSI min for SELL
 input double   InpRSISellMax     = 60.0;        // RSI max for SELL
 
 input group "=== Trailing Stop ==="
@@ -49,6 +49,7 @@ input bool     InpSessionFilter  = false;       // Enable session filter (London
 int g_emaFastH1Handle;     // EMA fast on H1
 int g_emaSlowH1Handle;     // EMA slow on H1
 int g_emaFastM5Handle;     // EMA fast on M5
+int g_emaSlowM5Handle;     // EMA slow on M5
 int g_rsiM5Handle;         // RSI on M5
 
 // State
@@ -68,18 +69,21 @@ int OnInit()
    
    // Create EMA handle for M5 timeframe
    g_emaFastM5Handle = iMA(_Symbol, PERIOD_M5, InpEMAFast, 0, MODE_EMA, PRICE_CLOSE);
+   g_emaSlowM5Handle = iMA(_Symbol, PERIOD_M5, InpEMASlow, 0, MODE_EMA, PRICE_CLOSE);
    
    // Create RSI handle for M5 timeframe
    g_rsiM5Handle = iRSI(_Symbol, PERIOD_M5, InpRSIPeriod, PRICE_CLOSE);
    
    // Validate handles
    if(g_emaFastH1Handle == INVALID_HANDLE || g_emaSlowH1Handle == INVALID_HANDLE ||
-      g_emaFastM5Handle == INVALID_HANDLE || g_rsiM5Handle == INVALID_HANDLE)
+      g_emaFastM5Handle == INVALID_HANDLE || g_emaSlowM5Handle == INVALID_HANDLE ||
+      g_rsiM5Handle == INVALID_HANDLE)
    {
       Print("ERROR: Failed to create indicator handles!");
       Print("  EMA Fast H1: ", g_emaFastH1Handle);
       Print("  EMA Slow H1: ", g_emaSlowH1Handle);
       Print("  EMA Fast M5: ", g_emaFastM5Handle);
+      Print("  EMA Slow M5: ", g_emaSlowM5Handle);
       Print("  RSI M5: ", g_rsiM5Handle);
       return(INIT_FAILED);
    }
@@ -103,6 +107,7 @@ void OnDeinit(const int reason)
    if(g_emaFastH1Handle != INVALID_HANDLE) IndicatorRelease(g_emaFastH1Handle);
    if(g_emaSlowH1Handle != INVALID_HANDLE) IndicatorRelease(g_emaSlowH1Handle);
    if(g_emaFastM5Handle != INVALID_HANDLE) IndicatorRelease(g_emaFastM5Handle);
+   if(g_emaSlowM5Handle != INVALID_HANDLE) IndicatorRelease(g_emaSlowM5Handle);
    if(g_rsiM5Handle != INVALID_HANDLE)     IndicatorRelease(g_rsiM5Handle);
    
    Print("XAUUSD ProTrader EA v2.0 removed. Reason=", reason);
@@ -152,7 +157,9 @@ void OnTick()
 }
 
 //+------------------------------------------------------------------+
-//| GetSignal - Simple EMA + RSI signal generation                     |
+//| GetSignal - EMA + RSI signal generation (BUY and SELL)             |
+//| BUY: H1 trend UP + M5 momentum UP + RSI healthy                   |
+//| SELL: H1 trend DOWN OR M5 bearish crossover + RSI confirms        |
 //+------------------------------------------------------------------+
 int GetSignal()
 {
@@ -161,51 +168,122 @@ int GetSignal()
    if(CopyBuffer(g_emaFastH1Handle, 0, 0, 2, emaFastH1) < 2) return 0;
    if(CopyBuffer(g_emaSlowH1Handle, 0, 0, 2, emaSlowH1) < 2) return 0;
    
-   // Read EMA values from M5
-   double emaFastM5[2];
-   if(CopyBuffer(g_emaFastM5Handle, 0, 0, 2, emaFastM5) < 2) return 0;
+   // Read EMA values from M5 (both fast and slow)
+   double emaFastM5[3], emaSlowM5[3];
+   if(CopyBuffer(g_emaFastM5Handle, 0, 0, 3, emaFastM5) < 3) return 0;
+   if(CopyBuffer(g_emaSlowM5Handle, 0, 0, 3, emaSlowM5) < 3) return 0;
    
    // Read RSI from M5
-   double rsi[2];
-   if(CopyBuffer(g_rsiM5Handle, 0, 0, 2, rsi) < 2) return 0;
+   double rsi[3];
+   if(CopyBuffer(g_rsiM5Handle, 0, 0, 3, rsi) < 3) return 0;
    
-   // Get current M5 close price (use last completed bar)
-   double closeM5 = iClose(_Symbol, PERIOD_M5, 1);
+   // Get M5 close prices (bar 1 = last completed bar)
+   double closeM5     = iClose(_Symbol, PERIOD_M5, 1);
+   double closeM5prev = iClose(_Symbol, PERIOD_M5, 2);
    
-   // Use bar index 0 = current (most recent) for indicators
+   // Current indicator values (index 0 = most recent)
    double ema21H1 = emaFastH1[0];
    double ema50H1 = emaSlowH1[0];
    double ema21M5 = emaFastM5[0];
+   double ema50M5 = emaSlowM5[0];
    double rsiVal  = rsi[0];
+   double rsiPrev = rsi[1];
    
-   // BUY signal conditions
-   bool buySignal = (ema21H1 > ema50H1) &&            // H1 trend is UP
-                    (closeM5 > ema21M5) &&             // M5 price above fast EMA
-                    (rsiVal > InpRSIBuyMin) &&         // RSI above minimum
-                    (rsiVal < InpRSIBuyMax);           // RSI below maximum
+   // H1 trend direction
+   bool h1TrendUp   = (ema21H1 > ema50H1);
+   bool h1TrendDown = (ema21H1 < ema50H1);
    
-   // SELL signal conditions
-   bool sellSignal = (ema21H1 < ema50H1) &&           // H1 trend is DOWN
-                     (closeM5 < ema21M5) &&            // M5 price below fast EMA
-                     (rsiVal > InpRSISellMin) &&       // RSI above minimum
-                     (rsiVal < InpRSISellMax);         // RSI below maximum
+   // M5 trend direction  
+   bool m5TrendUp   = (ema21M5 > ema50M5);
+   bool m5TrendDown = (ema21M5 < ema50M5);
+   
+   // M5 EMA crossover detection (bearish: fast crossed below slow)
+   bool m5BearishCross = (emaFastM5[1] >= emaSlowM5[1]) && (emaFastM5[0] < emaSlowM5[0]);
+   bool m5BullishCross = (emaFastM5[1] <= emaSlowM5[1]) && (emaFastM5[0] > emaSlowM5[0]);
+   
+   // Price momentum
+   bool priceAboveEMA21 = (closeM5 > ema21M5);
+   bool priceBelowEMA21 = (closeM5 < ema21M5);
+   
+   // RSI conditions
+   bool rsiBuyOK  = (rsiVal > InpRSIBuyMin && rsiVal < InpRSIBuyMax);
+   bool rsiSellOK = (rsiVal > InpRSISellMin && rsiVal < InpRSISellMax);
+   
+   // RSI falling (bearish momentum)
+   bool rsiFalling = (rsiVal < rsiPrev);
+   bool rsiRising  = (rsiVal > rsiPrev);
+   
+   //=================================================================
+   // BUY SIGNAL CONDITIONS
+   //=================================================================
+   // Primary: H1 uptrend + M5 price above EMA21 + RSI healthy
+   // Secondary: M5 bullish crossover + RSI rising
+   //=================================================================
+   bool buySignal = false;
+   
+   // Primary buy: H1 trend up + M5 momentum confirms
+   if(h1TrendUp && priceAboveEMA21 && rsiBuyOK)
+      buySignal = true;
+   
+   // Secondary buy: M5 bullish crossover with rising RSI (catch early entries)
+   if(m5BullishCross && rsiRising && rsiVal > 45 && rsiVal < 75)
+      buySignal = true;
+   
+   //=================================================================
+   // SELL SIGNAL CONDITIONS
+   //=================================================================
+   // Primary: H1 downtrend + M5 price below EMA21 + RSI healthy
+   // Secondary: M5 bearish crossover + RSI falling (works even in H1 uptrend)
+   // Tertiary: H1 uptrend BUT M5 shows reversal (overbought pullback sell)
+   //=================================================================
+   bool sellSignal = false;
+   
+   // Primary sell: H1 trend down + M5 confirms
+   if(h1TrendDown && priceBelowEMA21 && rsiSellOK)
+      sellSignal = true;
+   
+   // Secondary sell: M5 bearish crossover + RSI falling (trend reversal on M5)
+   if(m5BearishCross && rsiFalling && rsiVal < 60)
+      sellSignal = true;
+   
+   // Tertiary sell: H1 still up BUT M5 turned bearish + price below M5 EMAs + RSI dropping
+   // This catches pullbacks/corrections in an uptrend
+   if(h1TrendUp && m5TrendDown && priceBelowEMA21 && rsiFalling && rsiVal < 55)
+      sellSignal = true;
+   
+   // Overbought reversal sell: RSI was very high and is now dropping + price below EMA
+   if(priceBelowEMA21 && rsiPrev > 70 && rsiVal < 65 && rsiFalling)
+      sellSignal = true;
+   
+   //=================================================================
+   // CONFLICT RESOLUTION: if both fire, use RSI direction
+   //=================================================================
+   if(buySignal && sellSignal)
+   {
+      if(rsiRising)
+         sellSignal = false;
+      else
+         buySignal = false;
+   }
    
    if(buySignal)
    {
-      Print("BUY signal: EMA21_H1=", DoubleToString(ema21H1, 2),
+      Print(">>> BUY SIGNAL: EMA21_H1=", DoubleToString(ema21H1, 2),
             " EMA50_H1=", DoubleToString(ema50H1, 2),
             " Close_M5=", DoubleToString(closeM5, 2),
             " EMA21_M5=", DoubleToString(ema21M5, 2),
+            " EMA50_M5=", DoubleToString(ema50M5, 2),
             " RSI=", DoubleToString(rsiVal, 1));
       return 1;
    }
    
    if(sellSignal)
    {
-      Print("SELL signal: EMA21_H1=", DoubleToString(ema21H1, 2),
+      Print(">>> SELL SIGNAL: EMA21_H1=", DoubleToString(ema21H1, 2),
             " EMA50_H1=", DoubleToString(ema50H1, 2),
             " Close_M5=", DoubleToString(closeM5, 2),
             " EMA21_M5=", DoubleToString(ema21M5, 2),
+            " EMA50_M5=", DoubleToString(ema50M5, 2),
             " RSI=", DoubleToString(rsiVal, 1));
       return -1;
    }
