@@ -224,11 +224,23 @@ void CTrailingStop::SetProgressiveParams(double start, double minDist, double ra
 
 //+------------------------------------------------------------------+
 //| Main trailing management - routes to appropriate method           |
+//| Also prunes hidden stop data for positions that no longer exist   |
 //+------------------------------------------------------------------+
 void CTrailingStop::ManageTrailing()
 {
    if(m_mode == TRAIL_NONE) return;
 
+   //--- First, prune hidden stop entries for closed positions
+   for(int i = m_hiddenStopCount - 1; i >= 0; i--)
+   {
+      bool positionExists = m_position.SelectByTicket(m_hiddenStops[i].ticket);
+      if(!positionExists)
+      {
+         RemoveHiddenStop(m_hiddenStops[i].ticket);
+      }
+   }
+
+   //--- Then manage trailing for open positions
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(!m_position.SelectByIndex(i)) continue;

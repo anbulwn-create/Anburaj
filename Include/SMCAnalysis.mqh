@@ -81,16 +81,20 @@ public:
    //--- Order Block detection
    void              DetectOrderBlocks();
    bool              IsPriceAtOrderBlock(double price, bool &isBullish);
+   void              ConsumeOrderBlock(double price);
    int               GetOrderBlockCount() { return ArraySize(m_orderBlocks); }
+   bool              GetNearestOrderBlock(double price, bool isBuy, double &zoneHigh, double &zoneLow);
 
    //--- Fair Value Gap detection
    void              DetectFairValueGaps();
    bool              IsPriceInFVG(double price, bool &isBullish);
+   void              ConsumeFVG(double price);
    int               GetFVGCount() { return ArraySize(m_fvgZones); }
 
    //--- Liquidity detection
    void              DetectLiquidityPools();
    bool              IsLiquiditySweep(double price);
+   void              ConsumeLiquiditySweep(double price);
    int               GetLiquidityPoolCount() { return ArraySize(m_liquidityPools); }
 
    //--- Structure analysis
@@ -284,12 +288,20 @@ double CSMCAnalysis::GetRangeLow(int bars)
 //+------------------------------------------------------------------+
 void CSMCAnalysis::Update()
 {
+   //--- Reset structure flags at start of update cycle
+   m_bosDetected = false;
+   m_chochDetected = false;
+
    DetectSwingPoints();
    DetectOrderBlocks();
    DetectFairValueGaps();
    DetectLiquidityPools();
-   DetectBOS();
-   DetectCHoCH();
+
+   //--- BOS and CHoCH are mutually exclusive per update cycle
+   //--- CHoCH takes priority (structure change is more significant)
+   if(!DetectCHoCH())
+      DetectBOS();
+
    InvalidateExpiredZones();
 }
 
@@ -368,7 +380,7 @@ void CSMCAnalysis::DetectOrderBlocks()
 }
 
 //+------------------------------------------------------------------+
-//| Check if price is at an active order block                        |
+//| Check if price is at an active order block (pure query, no mutation)|
 //+------------------------------------------------------------------+
 bool CSMCAnalysis::IsPriceAtOrderBlock(double price, bool &isBullish)
 {
@@ -379,14 +391,69 @@ bool CSMCAnalysis::IsPriceAtOrderBlock(double price, bool &isBullish)
       if(price >= m_orderBlocks[i].priceLow && price <= m_orderBlocks[i].priceHigh)
       {
          isBullish = m_orderBlocks[i].isBullish;
-         m_orderBlocks[i].touchCount++;
-         // Invalidate after 3 touches
-         if(m_orderBlocks[i].touchCount >= 3)
-            m_orderBlocks[i].isValid = false;
          return true;
       }
    }
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Consume an order block after trade entry (increments touches)     |
+//+------------------------------------------------------------------+
+void CSMCAnalysis::ConsumeOrderBlock(double price)
+{
+   for(int i = 0; i < ArraySize(m_orderBlocks); i++)
+   {
+      if(!m_orderBlocks[i].isValid) continue;
+
+      if(price >= m_orderBlocks[i].priceLow && price <= m_orderBlocks[i].priceHigh)
+      {
+         m_orderBlocks[i].touchCount++;
+         if(m_orderBlocks[i].touchCount >= 3)
+            m_orderBlocks[i].isValid = false;
+         return;
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Get nearest order block zone for dynamic SL/TP placement         |
+//+------------------------------------------------------------------+
+bool CSMCAnalysis::GetNearestOrderBlock(double price, bool isBuy, double &zoneHigh, double &zoneLow)
+{
+   double bestDist = DBL_MAX;
+   bool found = false;
+
+   for(int i = 0; i < ArraySize(m_orderBlocks); i++)
+   {
+      if(!m_orderBlocks[i].isValid) continue;
+
+      // For buy SL: look for bearish OB below price
+      // For sell SL: look for bullish OB above price
+      if(isBuy && !m_orderBlocks[i].isBullish && m_orderBlocks[i].priceHigh < price)
+      {
+         double dist = price - m_orderBlocks[i].priceHigh;
+         if(dist < bestDist)
+         {
+            bestDist = dist;
+            zoneHigh = m_orderBlocks[i].priceHigh;
+            zoneLow = m_orderBlocks[i].priceLow;
+            found = true;
+         }
+      }
+      else if(!isBuy && m_orderBlocks[i].isBullish && m_orderBlocks[i].priceLow > price)
+      {
+         double dist = m_orderBlocks[i].priceLow - price;
+         if(dist < bestDist)
+         {
+            bestDist = dist;
+            zoneHigh = m_orderBlocks[i].priceHigh;
+            zoneLow = m_orderBlocks[i].priceLow;
+            found = true;
+         }
+      }
+   }
+   return found;
 }
 
 //+------------------------------------------------------------------+
@@ -452,7 +519,7 @@ void CSMCAnalysis::DetectFairValueGaps()
 }
 
 //+------------------------------------------------------------------+
-//| Check if price is within a Fair Value Gap                         |
+//| Check if price is within a Fair Value Gap (pure query, no mutation)|
 //+------------------------------------------------------------------+
 bool CSMCAnalysis::IsPriceInFVG(double price, bool &isBullish)
 {
@@ -463,12 +530,27 @@ bool CSMCAnalysis::IsPriceInFVG(double price, bool &isBullish)
       if(price >= m_fvgZones[i].priceLow && price <= m_fvgZones[i].priceHigh)
       {
          isBullish = m_fvgZones[i].isBullish;
-         // FVG is filled once price passes through
-         m_fvgZones[i].isValid = false;
          return true;
       }
    }
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Consume an FVG after trade entry (marks as filled)                |
+//+------------------------------------------------------------------+
+void CSMCAnalysis::ConsumeFVG(double price)
+{
+   for(int i = 0; i < ArraySize(m_fvgZones); i++)
+   {
+      if(!m_fvgZones[i].isValid) continue;
+
+      if(price >= m_fvgZones[i].priceLow && price <= m_fvgZones[i].priceHigh)
+      {
+         m_fvgZones[i].isValid = false;
+         return;
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -544,7 +626,7 @@ void CSMCAnalysis::DetectLiquidityPools()
 }
 
 //+------------------------------------------------------------------+
-//| Check if a liquidity sweep has occurred                           |
+//| Check if a liquidity sweep has occurred (pure query, no mutation) |
 //| A sweep occurs when price briefly pierces a liquidity level       |
 //| then reverses back                                                |
 //+------------------------------------------------------------------+
@@ -552,7 +634,6 @@ bool CSMCAnalysis::IsLiquiditySweep(double price)
 {
    double currentHigh = iHigh(m_symbol, m_timeframe, 0);
    double currentLow  = iLow(m_symbol, m_timeframe, 0);
-   double prevClose   = iClose(m_symbol, m_timeframe, 1);
 
    for(int i = 0; i < ArraySize(m_liquidityPools); i++)
    {
@@ -562,22 +643,47 @@ bool CSMCAnalysis::IsLiquiditySweep(double price)
       if(!m_liquidityPools[i].isBullish)
       {
          if(currentHigh > m_liquidityPools[i].priceHigh && price < m_liquidityPools[i].priceLow)
-         {
-            m_liquidityPools[i].isValid = false;
             return true;
-         }
       }
       // Sell-side liquidity sweep: price spiked below then reversed above
       else
       {
          if(currentLow < m_liquidityPools[i].priceLow && price > m_liquidityPools[i].priceHigh)
-         {
-            m_liquidityPools[i].isValid = false;
             return true;
-         }
       }
    }
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Consume a liquidity sweep after trade entry (marks as invalid)    |
+//+------------------------------------------------------------------+
+void CSMCAnalysis::ConsumeLiquiditySweep(double price)
+{
+   double currentHigh = iHigh(m_symbol, m_timeframe, 0);
+   double currentLow  = iLow(m_symbol, m_timeframe, 0);
+
+   for(int i = 0; i < ArraySize(m_liquidityPools); i++)
+   {
+      if(!m_liquidityPools[i].isValid) continue;
+
+      if(!m_liquidityPools[i].isBullish)
+      {
+         if(currentHigh > m_liquidityPools[i].priceHigh && price < m_liquidityPools[i].priceLow)
+         {
+            m_liquidityPools[i].isValid = false;
+            return;
+         }
+      }
+      else
+      {
+         if(currentLow < m_liquidityPools[i].priceLow && price > m_liquidityPools[i].priceHigh)
+         {
+            m_liquidityPools[i].isValid = false;
+            return;
+         }
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -586,7 +692,6 @@ bool CSMCAnalysis::IsLiquiditySweep(double price)
 //+------------------------------------------------------------------+
 bool CSMCAnalysis::DetectBOS()
 {
-   m_bosDetected = false;
    double currentClose = iClose(m_symbol, m_timeframe, 0);
 
    if(m_lastSwingHigh == 0 || m_lastSwingLow == 0) return false;
@@ -616,7 +721,6 @@ bool CSMCAnalysis::DetectBOS()
 //+------------------------------------------------------------------+
 bool CSMCAnalysis::DetectCHoCH()
 {
-   m_chochDetected = false;
    double currentClose = iClose(m_symbol, m_timeframe, 0);
 
    if(m_lastSwingHigh == 0 || m_lastSwingLow == 0) return false;

@@ -390,6 +390,59 @@ void ExecuteTrade(SignalResult &signal)
    double slPips = InpDefaultSLPips;
    double tpPips = InpDefaultTPPips;
 
+   //--- Use structure-based SL/TP from SMC if available
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double slPrice = 0;
+   double tpPrice = 0;
+
+   bool usedStructureSL = false;
+   bool usedStructureTP = false;
+
+   if(signal.suggestedSL > 0)
+   {
+      if(signal.signal == SIGNAL_BUY)
+      {
+         double structureSLDist = ask - signal.suggestedSL;
+         if(structureSLDist > 0)
+         {
+            slPips = PriceToPips(structureSLDist);
+            usedStructureSL = true;
+         }
+      }
+      else if(signal.signal == SIGNAL_SELL)
+      {
+         double structureSLDist = signal.suggestedSL - bid;
+         if(structureSLDist > 0)
+         {
+            slPips = PriceToPips(structureSLDist);
+            usedStructureSL = true;
+         }
+      }
+   }
+
+   if(signal.suggestedTP > 0)
+   {
+      if(signal.signal == SIGNAL_BUY)
+      {
+         double structureTPDist = signal.suggestedTP - ask;
+         if(structureTPDist > 0)
+         {
+            tpPips = PriceToPips(structureTPDist);
+            usedStructureTP = true;
+         }
+      }
+      else if(signal.signal == SIGNAL_SELL)
+      {
+         double structureTPDist = bid - signal.suggestedTP;
+         if(structureTPDist > 0)
+         {
+            tpPips = PriceToPips(structureTPDist);
+            usedStructureTP = true;
+         }
+      }
+   }
+
    //--- Validate risk-reward ratio
    if(!g_riskManager.ValidateRiskReward(slPips, tpPips))
    {
@@ -407,11 +460,6 @@ void ExecuteTrade(SignalResult &signal)
    }
 
    //--- Calculate SL and TP prices
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double slPrice = 0;
-   double tpPrice = 0;
-
    string comment = StringFormat("%s_%s_S%d", InpEAComment, SignalToString(signal.signal), signal.strength);
 
    if(signal.signal == SIGNAL_BUY)
@@ -422,8 +470,18 @@ void ExecuteTrade(SignalResult &signal)
       if(g_tradeManager.OpenBuy(lots, slPrice, tpPrice, comment))
       {
          g_totalTrades++;
-         LogInfo(StringFormat("BUY executed: %.2f lots | SL=%.2f | TP=%.2f | Strength=%d | %s",
-                 lots, slPrice, tpPrice, signal.strength, signal.reason));
+         //--- Consume SMC zones after successful trade entry
+         if(InpUseSMC)
+         {
+            double price = iClose(_Symbol, InpLowerTF, 0);
+            g_smcAnalysis.ConsumeOrderBlock(price);
+            g_smcAnalysis.ConsumeFVG(price);
+            g_smcAnalysis.ConsumeLiquiditySweep(price);
+         }
+         LogInfo(StringFormat("BUY executed: %.2f lots | SL=%.2f%s | TP=%.2f%s | Strength=%d | %s",
+                 lots, slPrice, usedStructureSL ? " (SMC)" : "",
+                 tpPrice, usedStructureTP ? " (SMC)" : "",
+                 signal.strength, signal.reason));
       }
    }
    else if(signal.signal == SIGNAL_SELL)
@@ -434,8 +492,18 @@ void ExecuteTrade(SignalResult &signal)
       if(g_tradeManager.OpenSell(lots, slPrice, tpPrice, comment))
       {
          g_totalTrades++;
-         LogInfo(StringFormat("SELL executed: %.2f lots | SL=%.2f | TP=%.2f | Strength=%d | %s",
-                 lots, slPrice, tpPrice, signal.strength, signal.reason));
+         //--- Consume SMC zones after successful trade entry
+         if(InpUseSMC)
+         {
+            double price = iClose(_Symbol, InpLowerTF, 0);
+            g_smcAnalysis.ConsumeOrderBlock(price);
+            g_smcAnalysis.ConsumeFVG(price);
+            g_smcAnalysis.ConsumeLiquiditySweep(price);
+         }
+         LogInfo(StringFormat("SELL executed: %.2f lots | SL=%.2f%s | TP=%.2f%s | Strength=%d | %s",
+                 lots, slPrice, usedStructureSL ? " (SMC)" : "",
+                 tpPrice, usedStructureTP ? " (SMC)" : "",
+                 signal.strength, signal.reason));
       }
    }
 }

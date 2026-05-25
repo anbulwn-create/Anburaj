@@ -40,8 +40,10 @@ private:
    int               m_consecutiveLosses;   // Current consecutive loss count
    double            m_dailyPnL;            // Today's profit/loss
    datetime          m_lastDayReset;        // Last daily reset time
-   double            m_equityHistory[];     // Equity curve tracking
+   double            m_equityHistory[];     // Equity curve tracking (circular buffer)
    int               m_equityHistorySize;   // Size of equity history
+   int               m_equityHistoryIdx;    // Current write index for circular buffer
+   int               m_equityHistoryFill;   // Number of entries filled so far
    int               m_equityMAPeriod;      // Period for equity MA
    bool              m_tradingPaused;       // Trading paused flag
    string            m_pauseReason;         // Reason trading is paused
@@ -122,6 +124,8 @@ CRiskManager::CRiskManager()
    m_dailyPnL = 0;
    m_lastDayReset = 0;
    m_equityHistorySize = 100;
+   m_equityHistoryIdx = 0;
+   m_equityHistoryFill = 0;
    m_equityMAPeriod = 20;
    m_tradingPaused = false;
    m_pauseReason = "";
@@ -158,6 +162,8 @@ bool CRiskManager::Init(double riskPercent, double maxDD, double dailyLimit,
 
    ArrayResize(m_equityHistory, m_equityHistorySize);
    ArrayInitialize(m_equityHistory, m_startingBalance);
+   m_equityHistoryIdx = 0;
+   m_equityHistoryFill = 0;
 
    LogInfo(StringFormat("RiskManager initialized: Risk=%.1f%% MaxDD=%.1f%% DailyLimit=%.1f%% MinBal=%.0f",
            m_riskPercent, m_maxDrawdownPercent, m_dailyLossLimit, m_minBalance));
@@ -419,32 +425,34 @@ double CRiskManager::CalculateKellyFraction()
 }
 
 //+------------------------------------------------------------------+
-//| Get equity moving average                                         |
+//| Get equity moving average (reads from circular buffer)            |
 //+------------------------------------------------------------------+
 double CRiskManager::GetEquityMA()
 {
-   int size = ArraySize(m_equityHistory);
-   if(size < m_equityMAPeriod) return 0;
+   if(m_equityHistoryFill < m_equityMAPeriod) return 0;
 
    double sum = 0;
-   for(int i = size - m_equityMAPeriod; i < size; i++)
-      sum += m_equityHistory[i];
+   for(int i = 0; i < m_equityMAPeriod; i++)
+   {
+      // Read backwards from the most recent entry
+      int idx = (m_equityHistoryIdx - 1 - i + m_equityHistorySize) % m_equityHistorySize;
+      sum += m_equityHistory[idx];
+   }
 
    return sum / m_equityMAPeriod;
 }
 
 //+------------------------------------------------------------------+
-//| Update equity history array                                       |
+//| Update equity history using circular buffer (O(1))                |
 //+------------------------------------------------------------------+
 void CRiskManager::UpdateEquityHistory()
 {
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   int size = ArraySize(m_equityHistory);
 
-   // Shift left and add new value
-   for(int i = 0; i < size - 1; i++)
-      m_equityHistory[i] = m_equityHistory[i + 1];
-   m_equityHistory[size - 1] = equity;
+   m_equityHistory[m_equityHistoryIdx] = equity;
+   m_equityHistoryIdx = (m_equityHistoryIdx + 1) % m_equityHistorySize;
+   if(m_equityHistoryFill < m_equityHistorySize)
+      m_equityHistoryFill++;
 }
 
 //+------------------------------------------------------------------+

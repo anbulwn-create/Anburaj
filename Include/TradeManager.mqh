@@ -44,8 +44,9 @@ private:
    bool              m_useCustomHours;
 
    //--- State
-   datetime          m_lastTradeTime;       // Time of last trade
-   bool              m_partialClosed[];     // Track partial close per position
+   datetime          m_lastTradeTime;            // Time of last trade
+   ulong             m_partialClosedTickets[];   // Tickets already partially closed
+   int               m_partialClosedCount;       // Count of partially closed tickets
 
 public:
                      CTradeManager();
@@ -112,6 +113,7 @@ CTradeManager::CTradeManager()
    m_customEndHour = 24;
    m_useCustomHours = false;
    m_lastTradeTime = 0;
+   m_partialClosedCount = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -119,7 +121,7 @@ CTradeManager::CTradeManager()
 //+------------------------------------------------------------------+
 CTradeManager::~CTradeManager()
 {
-   ArrayFree(m_partialClosed);
+   ArrayFree(m_partialClosedTickets);
 }
 
 //+------------------------------------------------------------------+
@@ -138,8 +140,16 @@ bool CTradeManager::Init(string symbol, long magic, string comment,
    // Configure CTrade object
    m_trade.SetExpertMagicNumber(magic);
    m_trade.SetDeviationInPoints(maxSlip);
-   m_trade.SetTypeFilling(ORDER_FILLING_FOK);
    m_trade.SetMarginMode();
+
+   // Detect and set supported filling mode
+   long fillingMode = SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
+   if((fillingMode & SYMBOL_FILLING_FOK) != 0)
+      m_trade.SetTypeFilling(ORDER_FILLING_FOK);
+   else if((fillingMode & SYMBOL_FILLING_IOC) != 0)
+      m_trade.SetTypeFilling(ORDER_FILLING_IOC);
+   else
+      m_trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
    // Initialize symbol info
    if(!m_symbolInfo.Name(symbol))
@@ -455,18 +465,49 @@ void CTradeManager::ManagePartialClose()
       // Check if partial close should trigger
       if(profitPips >= m_partialClosePips)
       {
-         // Check if we already partially closed this position
-         // Using comment check as simple tracking mechanism
-         string posComment = m_position.Comment();
-         if(StringFind(posComment, "[PC]") < 0)
+         // Check if we already partially closed this position using ticket tracking
+         bool alreadyClosed = false;
+         for(int j = 0; j < m_partialClosedCount; j++)
+         {
+            if(m_partialClosedTickets[j] == ticket)
+            {
+               alreadyClosed = true;
+               break;
+            }
+         }
+
+         if(!alreadyClosed)
          {
             if(PartialClose(ticket, m_partialClosePercent))
             {
-               // Update comment to mark partial close done
-               // Note: MT5 doesn't allow comment modification directly
-               // Track via separate mechanism if needed
+               // Record this ticket as partially closed
+               ArrayResize(m_partialClosedTickets, m_partialClosedCount + 1);
+               m_partialClosedTickets[m_partialClosedCount] = ticket;
+               m_partialClosedCount++;
             }
          }
+      }
+   }
+
+   // Prune tickets for positions that no longer exist
+   for(int i = m_partialClosedCount - 1; i >= 0; i--)
+   {
+      bool found = false;
+      for(int j = PositionsTotal() - 1; j >= 0; j--)
+      {
+         if(m_position.SelectByIndex(j) && m_position.Ticket() == m_partialClosedTickets[i])
+         {
+            found = true;
+            break;
+         }
+      }
+      if(!found)
+      {
+         // Remove closed position from tracking array
+         for(int k = i; k < m_partialClosedCount - 1; k++)
+            m_partialClosedTickets[k] = m_partialClosedTickets[k + 1];
+         m_partialClosedCount--;
+         ArrayResize(m_partialClosedTickets, m_partialClosedCount);
       }
    }
 }

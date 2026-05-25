@@ -178,15 +178,54 @@ int GetDayOfWeek()
 
 //+------------------------------------------------------------------+
 //| Check if it is a new bar on the specified timeframe               |
+//| Uses a static array to track bar times per timeframe safely       |
 //+------------------------------------------------------------------+
 bool IsNewBar(ENUM_TIMEFRAMES timeframe)
 {
-   static datetime lastBarTime = 0;
+   //--- Static array to track last bar time per timeframe index
+   //--- Supports up to 25 timeframe enum values (PERIOD_M1=1 to PERIOD_MN1=49153)
+   static datetime lastBarTimes[25];
+   static bool initialized = false;
+
+   if(!initialized)
+   {
+      ArrayInitialize(lastBarTimes, 0);
+      initialized = true;
+   }
+
+   //--- Map timeframe enum to a small index
+   int idx = 0;
+   switch(timeframe)
+   {
+      case PERIOD_M1:  idx = 0;  break;
+      case PERIOD_M2:  idx = 1;  break;
+      case PERIOD_M3:  idx = 2;  break;
+      case PERIOD_M4:  idx = 3;  break;
+      case PERIOD_M5:  idx = 4;  break;
+      case PERIOD_M6:  idx = 5;  break;
+      case PERIOD_M10: idx = 6;  break;
+      case PERIOD_M12: idx = 7;  break;
+      case PERIOD_M15: idx = 8;  break;
+      case PERIOD_M20: idx = 9;  break;
+      case PERIOD_M30: idx = 10; break;
+      case PERIOD_H1:  idx = 11; break;
+      case PERIOD_H2:  idx = 12; break;
+      case PERIOD_H3:  idx = 13; break;
+      case PERIOD_H4:  idx = 14; break;
+      case PERIOD_H6:  idx = 15; break;
+      case PERIOD_H8:  idx = 16; break;
+      case PERIOD_H12: idx = 17; break;
+      case PERIOD_D1:  idx = 18; break;
+      case PERIOD_W1:  idx = 19; break;
+      case PERIOD_MN1: idx = 20; break;
+      default:         idx = 21; break;
+   }
+
    datetime currentBarTime = iTime(_Symbol, timeframe, 0);
 
-   if(currentBarTime != lastBarTime)
+   if(currentBarTime != lastBarTimes[idx])
    {
-      lastBarTime = currentBarTime;
+      lastBarTimes[idx] = currentBarTime;
       return true;
    }
    return false;

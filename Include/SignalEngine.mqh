@@ -19,6 +19,8 @@ struct SignalResult
    bool              rsiConfirmed;     // RSI condition met
    bool              smcConfirmed;     // SMC confluence present
    string            reason;           // Human-readable reason
+   double            suggestedSL;      // Structure-based SL price (0 = use default)
+   double            suggestedTP;      // Structure-based TP price (0 = use default)
 };
 
 //+------------------------------------------------------------------+
@@ -327,7 +329,7 @@ int CSignalEngine::GetSMCScore()
 }
 
 //+------------------------------------------------------------------+
-//| Detect RSI divergence                                             |
+//| Detect RSI divergence using actual swing points                   |
 //| Bullish: price makes lower low but RSI makes higher low           |
 //| Bearish: price makes higher high but RSI makes lower high         |
 //+------------------------------------------------------------------+
@@ -338,28 +340,88 @@ bool CSignalEngine::DetectRSIDivergence(bool bullish)
    double rsi[20];
    if(CopyBuffer(m_hRsi, 0, 0, 20, rsi) < 20) return false;
 
+   int swingStrength = 2; // bars on each side to confirm swing
+
    if(bullish)
    {
-      // Check last 20 bars for bullish divergence
-      double priceLow1 = iLow(m_symbol, m_lowerTF, 0);
-      double priceLow2 = iLow(m_symbol, m_lowerTF, 10);
-      double rsiLow1 = rsi[0];
-      double rsiLow2 = rsi[10];
+      // Find the two most recent swing lows within lookback
+      double swingLow1Price = 0, swingLow2Price = 0;
+      double swingLow1RSI = 0, swingLow2RSI = 0;
+      int found = 0;
 
-      // Price lower low, RSI higher low = bullish divergence
-      if(priceLow1 < priceLow2 && rsiLow1 > rsiLow2)
+      for(int i = swingStrength; i < 18 - swingStrength && found < 2; i++)
+      {
+         double low = iLow(m_symbol, m_lowerTF, i);
+         bool isSwing = true;
+
+         // Verify it is a swing low (lower than neighbors)
+         for(int j = 1; j <= swingStrength; j++)
+         {
+            if(iLow(m_symbol, m_lowerTF, i - j) <= low) { isSwing = false; break; }
+            if(iLow(m_symbol, m_lowerTF, i + j) <= low) { isSwing = false; break; }
+         }
+
+         if(isSwing)
+         {
+            if(found == 0)
+            {
+               swingLow1Price = low;
+               swingLow1RSI = rsi[i];
+            }
+            else
+            {
+               swingLow2Price = low;
+               swingLow2RSI = rsi[i];
+            }
+            found++;
+         }
+      }
+
+      if(found < 2) return false;
+
+      // Bullish divergence: more recent swing low is lower in price but higher in RSI
+      if(swingLow1Price < swingLow2Price && swingLow1RSI > swingLow2RSI)
          return true;
    }
    else
    {
-      // Check for bearish divergence
-      double priceHigh1 = iHigh(m_symbol, m_lowerTF, 0);
-      double priceHigh2 = iHigh(m_symbol, m_lowerTF, 10);
-      double rsiHigh1 = rsi[0];
-      double rsiHigh2 = rsi[10];
+      // Find the two most recent swing highs within lookback
+      double swingHigh1Price = 0, swingHigh2Price = 0;
+      double swingHigh1RSI = 0, swingHigh2RSI = 0;
+      int found = 0;
 
-      // Price higher high, RSI lower high = bearish divergence
-      if(priceHigh1 > priceHigh2 && rsiHigh1 < rsiHigh2)
+      for(int i = swingStrength; i < 18 - swingStrength && found < 2; i++)
+      {
+         double high = iHigh(m_symbol, m_lowerTF, i);
+         bool isSwing = true;
+
+         // Verify it is a swing high (higher than neighbors)
+         for(int j = 1; j <= swingStrength; j++)
+         {
+            if(iHigh(m_symbol, m_lowerTF, i - j) >= high) { isSwing = false; break; }
+            if(iHigh(m_symbol, m_lowerTF, i + j) >= high) { isSwing = false; break; }
+         }
+
+         if(isSwing)
+         {
+            if(found == 0)
+            {
+               swingHigh1Price = high;
+               swingHigh1RSI = rsi[i];
+            }
+            else
+            {
+               swingHigh2Price = high;
+               swingHigh2RSI = rsi[i];
+            }
+            found++;
+         }
+      }
+
+      if(found < 2) return false;
+
+      // Bearish divergence: more recent swing high is higher in price but lower in RSI
+      if(swingHigh1Price > swingHigh2Price && swingHigh1RSI < swingHigh2RSI)
          return true;
    }
 
@@ -391,6 +453,8 @@ SignalResult CSignalEngine::GenerateSignal()
    result.rsiConfirmed = false;
    result.smcConfirmed = false;
    result.reason = "No signal";
+   result.suggestedSL = 0;
+   result.suggestedTP = 0;
 
    if(!m_initialized) return result;
 
@@ -398,8 +462,13 @@ SignalResult CSignalEngine::GenerateSignal()
    int rsiScore = GetRSIScore();
    int smcScore = GetSMCScore();
 
-   // Weighted composite score
+   // Weighted composite score (guard against division by zero)
    double totalWeight = m_weightEMA + m_weightRSI + m_weightSMC;
+   if(totalWeight <= 0)
+   {
+      result.reason = "All signal weights are zero - cannot generate signal";
+      return result;
+   }
    double compositeScore = (emaScore * m_weightEMA + rsiScore * m_weightRSI + smcScore * m_weightSMC) / totalWeight;
 
    result.strength = (int)MathAbs(compositeScore);
@@ -426,6 +495,37 @@ SignalResult CSignalEngine::GenerateSignal()
    {
       result.reason = StringFormat("NO SIGNAL: EMA=%d RSI=%d SMC=%d Composite=%.0f (threshold=%d)",
                                     emaScore, rsiScore, smcScore, compositeScore, minStrength);
+   }
+
+   //--- Populate structure-based SL/TP from SMC when available
+   if(result.signal != SIGNAL_NONE && m_smcAnalysis != NULL)
+   {
+      double price = iClose(m_symbol, m_lowerTF, 0);
+      bool isBuy = (result.signal == SIGNAL_BUY);
+
+      // Use nearest opposing order block for SL placement
+      double obHigh = 0, obLow = 0;
+      if(m_smcAnalysis.GetNearestOrderBlock(price, isBuy, obHigh, obLow))
+      {
+         if(isBuy)
+            result.suggestedSL = obLow;   // Place SL below bearish OB
+         else
+            result.suggestedSL = obHigh;  // Place SL above bullish OB
+      }
+
+      // Use opposing structure level for TP
+      if(isBuy)
+      {
+         double swingHigh = m_smcAnalysis.GetLastSwingHigh();
+         if(swingHigh > price)
+            result.suggestedTP = swingHigh;
+      }
+      else
+      {
+         double swingLow = m_smcAnalysis.GetLastSwingLow();
+         if(swingLow > 0 && swingLow < price)
+            result.suggestedTP = swingLow;
+      }
    }
 
    return result;
