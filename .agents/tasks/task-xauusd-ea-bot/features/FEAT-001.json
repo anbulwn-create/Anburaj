@@ -1,0 +1,45 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the complete modular MQL5 Expert Advisor for XAUUSD with all include files implementing: EMA multi-timeframe trend following, RSI confirmation, Smart Money Concepts (order blocks, fair value gaps, liquidity sweeps, break of structure), hidden lock-in profit, trailing stops, jump stop loss, news filter, automatic lot sizing, spread/slippage protection, automatic risk management, and money management. The EA must be professional-grade with clean architecture.",
+  "status": "in_progress",
+  "steps": [
+    "Create Include/Utils.mqh - Utility functions: logging helpers, time-of-day checks, session detection (London/NY/Asian), pip/point calculations for XAUUSD, array helpers, and enumerations shared across modules.",
+    "Create Include/SMCAnalysis.mqh - Smart Money Concepts engine: detect order blocks (bullish/bearish), fair value gaps (FVG), liquidity pools (equal highs/lows, swing points), break of structure (BOS), change of character (CHoCH), premium/discount zones. Use multi-timeframe structure analysis.",
+    "Create Include/SignalEngine.mqh - Signal generation combining: (1) EMA trend filter with dual timeframe confirmation (H1 higher TF + M5 lower TF using EMA 50/200 crossover and price position), (2) RSI overbought/oversold with divergence detection, (3) SMC confluence signals. Generate BUY/SELL/NO_SIGNAL output with signal strength scoring.",
+    "Create Include/RiskManager.mqh - Risk and money management: automatic lot calculation based on account balance and risk percentage, Kelly criterion option, maximum drawdown protection, daily loss limit, consecutive loss reduction, equity curve trading, minimum balance protection (for $100 accounts), position sizing tiers based on account size.",
+    "Create Include/TradeManager.mqh - Order execution: spread filter (max spread check before entry), slippage protection with max deviation, partial close capability, break-even management, maximum open positions limit, trade cooldown timer, session-based trading windows, magic number management.",
+    "Create Include/TrailingStop.mqh - Advanced trailing and profit protection: standard trailing stop with step, hidden lock-in profit (moves SL to breakeven + X pips after Y pips profit without server-side modification), hidden jump stop loss (moves SL in jumps/steps rather than continuously), profit protection via progressive trailing (tightens as profit grows), multiple trailing modes (fixed, ATR-based, structure-based).",
+    "Create Include/NewsFilter.mqh - News event filter: built-in high-impact news schedule for major USD events, configurable minutes before/after news to avoid trading, manual override option, day-of-week filter, time-based trading restrictions.",
+    "Create XAUUSD_ProTrader_EA.mq5 - Main EA file: all input parameters organized in groups, OnInit() initialization with validation, OnDeinit() cleanup, OnTick() main logic loop coordinating all modules, OnTimer() for periodic checks, dashboard/HUD overlay showing EA status on chart, comprehensive error handling, and proper resource management.",
+    "Create README.md - Complete documentation: EA overview, feature list, installation instructions (copy to MT5 data folder), input parameter descriptions organized by category, recommended settings for XAUUSD M5/H1, risk disclaimers, broker compatibility notes, minimum deposit guidance ($100), troubleshooting section."
+  ],
+  "acceptance_criteria": [
+    "All 7 .mqh include files and 1 .mq5 main file exist with complete implementations",
+    "Main EA file properly includes all modules and coordinates them in OnTick()",
+    "EMA dual-timeframe check uses H1 and M5 with EMA 50/200",
+    "RSI signal includes overbought/oversold levels with configurable periods",
+    "SMC module detects order blocks, fair value gaps, and liquidity sweeps",
+    "Hidden lock-in profit logic moves SL to breakeven internally without modifying server SL prematurely",
+    "Trailing stop supports multiple modes including ATR-based",
+    "Jump stop loss moves in discrete steps rather than continuously",
+    "News filter has built-in schedule and configurable blackout periods",
+    "Lot sizing auto-calculates based on risk percentage and account balance",
+    "Spread check prevents entry when spread exceeds threshold",
+    "Slippage protection uses maxDeviation parameter",
+    "Risk management includes daily loss limit and max drawdown protection",
+    "All input parameters have descriptive comments and are organized in groups",
+    "Code uses MQL5 standard library classes (CTrade, CPositionInfo, CSymbolInfo)",
+    "README.md provides complete installation and configuration guide",
+    "Code is professional quality with consistent naming, comments, and error handling"
+  ],
+  "verification": [
+    "Verify all files exist: XAUUSD_ProTrader_EA.mq5, Include/Utils.mqh, Include/SignalEngine.mqh, Include/RiskManager.mqh, Include/TradeManager.mqh, Include/TrailingStop.mqh, Include/NewsFilter.mqh, Include/SMCAnalysis.mqh, README.md",
+    "Verify main .mq5 file includes all .mqh files and implements OnInit, OnDeinit, OnTick handlers",
+    "Verify each module has proper header guards (#ifndef/#define/#endif or #property strict)",
+    "Verify input parameters cover all documented features",
+    "Verify code follows MQL5 conventions (proper types, function signatures, event handlers)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

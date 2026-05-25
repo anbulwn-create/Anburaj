@@ -1,0 +1,7 @@
+{
+  "task_id": "task-xauusd-ea-bot",
+  "task_description": "Create a professional-grade MetaTrader 5 Expert Advisor for XAUUSD trading with modular architecture. Features: EMA multi-timeframe trend following, RSI confirmation, Smart Money Concepts (order blocks, FVG, liquidity), hidden lock-in profit, trailing stops, jump stop loss, news filter, automatic lot sizing, spread/slippage protection, risk management, and money management. Designed for M5/H1 timeframe with minimum $100 deposit.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

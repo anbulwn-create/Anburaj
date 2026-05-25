@@ -1,0 +1,26 @@
+{
+  "project_type": "MetaTrader 5 Expert Advisor (MQL5)",
+  "language": "MQL5",
+  "build_system": "MetaTrader 5 MetaEditor compiler (not available in sandbox - AST/syntax validation only)",
+  "test_framework": "Manual backtesting in MT5 Strategy Tester (not available in sandbox)",
+  "build_command": "N/A - MQL5 compiles in MetaEditor IDE",
+  "test_command": "N/A - requires MT5 platform",
+  "verification_instructions": "Verify code syntax correctness, file structure completeness, and logical consistency. No compilation or runtime testing possible in sandbox.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "Copy .mq5 and .mqh files to MT5 Data Folder/MQL5/Experts/ directory. Compile in MetaEditor.",
+  "environment_constraints": "INTEGRATIONS_ONLY network - no external access. Pure code generation task. MQL5 cannot be compiled or tested in this environment. Validation limited to code review and structural checks.",
+  "contribution_requirements": "Professional-grade MQL5 code with modular architecture using include files (.mqh). Well-commented, production-ready.",
+  "key_patterns": "MQL5 EA structure: OnInit(), OnDeinit(), OnTick(), OnTimer() event handlers. Include files for modularity. Input parameters for user configuration. CPositionInfo, CTrade, CSymbolInfo standard library classes.",
+  "relevant_files": [
+    "XAUUSD_ProTrader_EA.mq5 (main EA file)",
+    "Include/SignalEngine.mqh (EMA + RSI + SMC signal generation)",
+    "Include/RiskManager.mqh (money management, lot sizing, risk levels)",
+    "Include/TradeManager.mqh (order execution, spread/slippage protection)",
+    "Include/TrailingStop.mqh (trailing stop, hidden lock-in profit, jump stop loss)",
+    "Include/NewsFilter.mqh (news event filter)",
+    "Include/SMCAnalysis.mqh (Smart Money Concepts - order blocks, fair value gaps, liquidity)",
+    "Include/Utils.mqh (utility functions, logging, time helpers)",
+    "README.md (documentation)"
+  ],
+  "directory_structure": "Root: main .mq5 file + README. Include/: all .mqh module files for modular organization."
+}
