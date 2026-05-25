@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Complete rewrite of XAUUSD ProTrader EA from 4000+ line over-engineered version to lean 484-line procedural EA that will actually take trades. Uses EMA 21/50 on H1 for trend, M5 price vs EMA21 for entry, RSI 14 confirmation. Zero includes, raw OrderSend with filling mode fallback, simple trailing stop.",
+  "status": "completed",
+  "steps": [
+    "Rewrite XAUUSD_ProTrader_EA.mq5 completely - remove all SMC, news filter, dashboard, class-based architecture",
+    "Implement simple EMA 21/50 H1 trend + M5 EMA21 pullback + RSI 14 signal generation",
+    "Implement raw OrderSend with FOK/IOC/RETURN filling mode fallback",
+    "Implement automatic lot sizing based on risk percentage",
+    "Implement simple trailing stop that activates after X points profit",
+    "Add Print() debug statements for Experts tab visibility",
+    "Update README.md to reflect v2.0 simplified approach",
+    "Verify braces balanced, no includes, under 500 lines"
+  ],
+  "acceptance_criteria": [
+    "File is under 500 lines total (achieved: 484)",
+    "ZERO #include statements",
+    "Uses raw MQL5 OrderSend() with MqlTradeRequest/MqlTradeResult",
+    "Signal fires on every new M5 bar where EMA trend is clear and RSI confirms",
+    "No news filter by default (InpNewsFilter = false)",
+    "No session filter by default (InpSessionFilter = false)",
+    "Simple risk management: 1% risk, max 2 positions",
+    "Default SL = 300 points, TP = 600 points",
+    "Trailing stop: 200 points activation, 150 points distance",
+    "Filling mode fallback: FOK -> IOC -> RETURN",
+    "New bar detection using iTime comparison",
+    "Bars readiness check (60 bars minimum)",
+    "Print statements for all key events (signal, order, trailing)",
+    "Braces balanced (31/31)",
+    "No classes - pure procedural code"
+  ],
+  "blocked_reason": null,
+  "findings": "Complete rewrite from 4094 lines to 484 lines. Removed: SMC analysis, complex signal scoring, news filter engine, multiple trailing modes, dashboard/HUD, class hierarchy, session filters. Kept: EMA trend detection (simplified to 21/50 from 50/200), RSI confirmation (simplified to zone check), automatic lot sizing, trailing stop (simplified to single mode), position counting. The key change is that signals now fire whenever EMA alignment + RSI zone match on any new M5 bar, instead of requiring impossible confluence of SMC + news + session + minimum strength score."
+}
